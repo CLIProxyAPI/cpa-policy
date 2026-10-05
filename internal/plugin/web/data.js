@@ -1,7 +1,7 @@
 // Data groups publish independently; saves replace their returned entries.
 // Each entry retains its last successful value when a read fails.
 function dataEntries(labels) {
-  return Object.fromEntries(Object.entries(labels).map(([name, label]) => [name, { label, value: null, error: "" }]));
+  return Object.fromEntries(Object.entries(labels).map(([name, label]) => [name, { label, value: null, error: "", readAt: 0 }]));
 }
 
 const resources = {
@@ -82,10 +82,11 @@ function createQuery(label, receive = (value) => value) {
     label,
     value: null,
     error: "",
+    readAt: 0,
     key: "",
     task: null,
     request: null,
-    clear() { Object.assign(query, { value: null, error: "", key: "", task: null, request: null }); },
+    clear() { Object.assign(query, { value: null, error: "", readAt: 0, key: "", task: null, request: null }); },
     read(key, fetch, reload = false) {
       if (key !== query.key) query.clear();
       if (!reload && query.task) return query.task;
@@ -113,6 +114,7 @@ function createQuery(label, receive = (value) => value) {
         .finally(() => {
           if (query.request === request) {
             query.task = null;
+            query.readAt = Date.now();
             renderPage();
           }
         });
@@ -611,9 +613,10 @@ function loadDataGroup(account, name, reload = false) {
     if (values.authFiles) updateAuthFiles(account, values.authFiles);
     for (const [key, value] of Object.entries(values)) Object.assign(resources[role][key], { value, error: "" });
     for (const { key, error } of failures) resources[role][key].error = error.message || String(error);
+    for (const key of group.names) resources[role][key].readAt = Date.now();
     if (values.profile?.tracked === false) {
       for (const [key, resource] of Object.entries(resources.account)) {
-        if (key !== "profile") Object.assign(resource, { value: null, error: "" });
+        if (key !== "profile") Object.assign(resource, { value: null, error: "", readAt: 0 });
       }
       analysisQueries.account.clear();
       for (const list of Object.values(pagedLists.account)) list.reset();

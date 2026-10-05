@@ -177,7 +177,7 @@ function resetRoleData(role) {
     resourceGroups.admin.configuration.syncErrors = [];
     keyDirectory.clear();
   }
-  for (const entry of Object.values(resources[role])) Object.assign(entry, { value: null, error: "" });
+  for (const entry of Object.values(resources[role])) Object.assign(entry, { value: null, error: "", readAt: 0 });
   for (const group of Object.values(resourceGroups[role])) group.task = null;
   for (const page of Object.values(pages[role])) {
     page.task = null;
@@ -297,14 +297,14 @@ for (const tab of TABS)
   tab.onclick = () => {
     if (activeTab(false) === tab.dataset.tab) return;
     setAdminTab(tab.dataset.tab);
-    guard(() => loadPage(false));
+    if (!refreshStalePage()) guard(() => loadPage(false));
   };
 
 document.querySelectorAll("[data-account-tab]").forEach((button) => {
   button.onclick = () => {
     if (activeTab(true) === button.dataset.accountTab) return;
     setAccountTab(button.dataset.accountTab);
-    guard(() => loadPage(true));
+    if (!refreshStalePage()) guard(() => loadPage(true));
   };
 });
 $("analysis-key").addEventListener("change", () =>
@@ -437,6 +437,13 @@ function refreshPage() {
   if (!currentRole) return Promise.resolve();
   return currentPage().task || guard(() => loadPage(currentRole === "account", { reload: true }));
 }
+
+const PAGE_STALE_MS = 5 * 60 * 1000;
+function refreshStalePage() {
+  if (currentPage()?.sources.some((source) => source.readAt && Date.now() - source.readAt >= PAGE_STALE_MS)) return refreshPage();
+}
+
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshStalePage(); });
 
 for (const role of ["admin", "account"]) {
   const button = privacyMaskButton(role);
