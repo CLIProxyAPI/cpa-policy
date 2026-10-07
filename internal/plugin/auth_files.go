@@ -22,6 +22,8 @@ const (
 	hostHTTPDo   = "host.http.do"
 )
 
+const xaiGrokClientVersion = "1.0.44"
+
 var quotaResetIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 type HostCaller func(method string, payload any) (json.RawMessage, error)
@@ -981,7 +983,12 @@ func (a *App) fetchKimiQuota(callbackID, token string, result *authQuotaResponse
 }
 
 func (a *App) fetchXAIQuota(callbackID, token, userID string, result *authQuotaResponse) error {
-	headers := http.Header{"X-Xai-Token-Auth": {"xai-grok-cli"}, "X-Grok-Client-Version": {"0.2.93"}, "User-Agent": {"grok-pager/0.2.93 grok-shell/0.2.93"}, "Accept": {"*/*"}}
+	headers := http.Header{
+		"X-Xai-Token-Auth":      {"xai-grok-cli"},
+		"X-Grok-Client-Version": {xaiGrokClientVersion},
+		"User-Agent":            {"grok-pager/" + xaiGrokClientVersion + " grok-shell/" + xaiGrokClientVersion},
+		"Accept":                {"*/*"},
+	}
 	if userID != "" {
 		headers.Set("X-Userid", userID)
 	}
