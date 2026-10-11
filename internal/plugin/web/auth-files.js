@@ -400,7 +400,7 @@ function renderAuthFileRow(file, account) {
           disabled: !canResetAuthQuota(file, account),
           onclick: () => guard(() => resetAuthQuota(file, account))
         },
-        actionIcon("party-popper")
+        actionIcon("rotate-cw-clock")
       ),
     el(
       "button",
