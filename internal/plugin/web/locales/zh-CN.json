@@ -575,7 +575,7 @@
   "backend.parse_auth_file_value": "解析认证文件失败：{v0}",
   "backend.invalid_auth_file_contents": "认证文件内容无效",
   "backend.api_key_credentials_do_not_support_this_quota_query": "API Key 凭证不支持此额度查询",
-  "backend.quota_queries_do_not_support_a_separate_proxy_for_an_auth_file": "额度查询不支持认证文件的独立代理",
+  "backend.invalid_auth_file_proxy": "认证文件的代理配置无效",
   "backend.auth_file_has_no_usable_credentials": "认证文件无可用凭证",
   "backend.auth_file_is_missing_project_id": "认证文件缺少 project_id",
   "backend.build_quota_request_value": "构造额度请求失败：{v0}",

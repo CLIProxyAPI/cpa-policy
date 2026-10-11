@@ -300,7 +300,8 @@ func TestUpstreamErrorsRedactPhysicalCredential(t *testing.T) {
 		app.SetHostCaller(func(string, any) (json.RawMessage, error) {
 			return mustJSONRaw(t, hostHTTPResponse{StatusCode: tc.status, Body: []byte(tc.body)}), nil
 		})
-		_, errCall := app.upstream("", http.MethodGet, "https://example.invalid/quota", "dummy-secret-token", nil, nil)
+		client := &authQuotaClient{hostCaller: app.hostCaller, token: "dummy-secret-token"}
+		_, errCall := client.upstream(http.MethodGet, "https://example.invalid/quota", nil, nil)
 		detail := messages.FromError(errCall)
 		if errCall == nil || detail.Key != tc.key || strings.Contains(detail.Text, "dummy-secret-token") {
 			t.Fatalf("error = %v, detail = %+v", errCall, detail)
@@ -404,7 +405,11 @@ func TestCodexResetCreditExpiry(t *testing.T) {
 				return mustJSONRaw(t, hostHTTPResponse{StatusCode: tc.status, Body: []byte(tc.credits)}), nil
 			})
 			result := authQuotaResponse{}
-			if err := app.fetchCodexQuota("dummy-callback", "dummy-token", "dummy-account", &result); err != nil {
+			client := &authQuotaClient{
+				hostCaller: app.hostCaller, callbackID: "dummy-callback", token: "dummy-token",
+				credential: map[string]any{"account_id": "dummy-account"},
+			}
+			if err := client.fetchCodexQuota(&result); err != nil {
 				t.Fatal(err)
 			}
 			if calls != 2 || len(result.RateLimitResetCredits) != tc.wantCredits || result.RateLimitResetCreditsUnavailable != tc.unavailable || len(result.Quota) != 1 || *result.Quota[0].RemainingPercent != 62 {
@@ -465,7 +470,8 @@ func TestClaudeQuotaUsesFableLimitAndCanonicalTeamPlan(t *testing.T) {
 		return mustJSONRaw(t, hostHTTPResponse{StatusCode: http.StatusOK, Body: []byte(responses[request.URL])}), nil
 	})
 	result := authQuotaResponse{Quota: []quotaRow{}}
-	if errFetch := app.fetchClaudeQuota("", "token", &result); errFetch != nil {
+	client := &authQuotaClient{hostCaller: app.hostCaller, token: "token"}
+	if errFetch := client.fetchClaudeQuota(&result); errFetch != nil {
 		t.Fatal(errFetch)
 	}
 	if len(result.Quota) != 3 || result.Quota[0].Label != "5-hour limit" || result.Quota[1].Label != "Sonnet weekly limit" || result.Quota[2].Label != "Fable weekly limit" {
@@ -509,7 +515,12 @@ func TestClaudeResetSpendsOnlyAUsableGrant(t *testing.T) {
 				return mustJSONRaw(t, hostHTTPResponse{StatusCode: http.StatusOK, Body: []byte(body)}), nil
 			})
 			got := ""
-			if err := app.resetClaudeQuota("", hostAuthFile{AuthIndex: "claude-1", Type: "claude"}, resetID); err != nil {
+			client, err := app.openAuthQuotaClient("", hostAuthFile{AuthIndex: "claude-1", Type: "claude"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.close()
+			if err := client.resetClaudeQuota(resetID); err != nil {
 				got = err.Error()
 			}
 			if claimed != tc.claimed || got != tc.want {
@@ -531,7 +542,8 @@ func TestClaudeQuotaOmitsDisabledExtraUsage(t *testing.T) {
 		return mustJSONRaw(t, hostHTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"account":{"has_claude_pro":true}}`)}), nil
 	})
 	result := authQuotaResponse{Quota: []quotaRow{}}
-	if errFetch := app.fetchClaudeQuota("", "token", &result); errFetch != nil {
+	client := &authQuotaClient{hostCaller: app.hostCaller, token: "token"}
+	if errFetch := client.fetchClaudeQuota(&result); errFetch != nil {
 		t.Fatal(errFetch)
 	}
 	if len(result.Quota) != 0 || !profileCalled || result.Plan != "Pro" {
@@ -581,7 +593,8 @@ func TestKimiQuotaReadsNestedLimitShape(t *testing.T) {
 	})
 	fetchedAt := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	result := authQuotaResponse{FetchedAt: fetchedAt, Quota: []quotaRow{}}
-	if errFetch := app.fetchKimiQuota("", "token", &result); errFetch != nil {
+	client := &authQuotaClient{hostCaller: app.hostCaller, token: "token"}
+	if errFetch := client.fetchKimiQuota(&result); errFetch != nil {
 		t.Fatal(errFetch)
 	}
 	if len(result.Quota) != 1 {
@@ -607,7 +620,8 @@ func TestXAIQuotaDeduplicatesProductLimits(t *testing.T) {
 		return mustJSONRaw(t, hostHTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"config":{}}`)}), nil
 	})
 	result := authQuotaResponse{Quota: []quotaRow{}}
-	if errFetch := app.fetchXAIQuota("", "token", "user", &result); errFetch != nil {
+	client := &authQuotaClient{hostCaller: app.hostCaller, token: "token", credential: map[string]any{"user_id": "user"}}
+	if errFetch := client.fetchXAIQuota(&result); errFetch != nil {
 		t.Fatal(errFetch)
 	}
 	if len(result.Quota) != 2 || result.Quota[0].Label != "grok code usage" || result.Quota[0].RemainingPercent == nil || *result.Quota[0].RemainingPercent != 55 || result.Quota[1].Label != "Grok Vision usage" {
@@ -615,16 +629,16 @@ func TestXAIQuotaDeduplicatesProductLimits(t *testing.T) {
 	}
 }
 
-func TestCredentialProxyFailsInsteadOfSendingDirectRequest(t *testing.T) {
+func TestInvalidCredentialProxyFailsInsteadOfSendingHostRequest(t *testing.T) {
 	app := newConfiguredApp(t)
 	app.SetHostCaller(func(method string, _ any) (json.RawMessage, error) {
 		if method != hostAuthGet {
 			t.Fatalf("unexpected host method %q", method)
 		}
-		return json.RawMessage(`{"auth_index":"codex-1","json":{"access_token":"dummy-token","proxy_url":"socks5://proxy.example:1080"}}`), nil
+		return json.RawMessage(`{"auth_index":"codex-1","json":{"access_token":"dummy-token","proxy_url":"invalid://dummy-proxy:1080"}}`), nil
 	})
 	_, errFetch := app.fetchAuthQuota("", hostAuthFile{AuthIndex: "codex-1"}, "codex")
-	if errFetch == nil || !strings.Contains(errFetch.Error(), "separate proxy") {
+	if errFetch == nil || errFetch.Error() != "Invalid auth file proxy" {
 		t.Fatalf("error = %v", errFetch)
 	}
 }
@@ -644,7 +658,8 @@ func TestXAIQuotaCombinesWeeklyMonthlyAndOnDemand(t *testing.T) {
 		return mustJSONRaw(t, hostHTTPResponse{StatusCode: http.StatusOK, Body: []byte(body)}), nil
 	})
 	result := authQuotaResponse{Quota: []quotaRow{}}
-	if errFetch := app.fetchXAIQuota("", "token", "user", &result); errFetch != nil {
+	client := &authQuotaClient{hostCaller: app.hostCaller, token: "token", credential: map[string]any{"user_id": "user"}}
+	if errFetch := client.fetchXAIQuota(&result); errFetch != nil {
 		t.Fatal(errFetch)
 	}
 	want := []string{"Weekly limit", "Monthly allowance", "Pay-as-you-go allowance"}

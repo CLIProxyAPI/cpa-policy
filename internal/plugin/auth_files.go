@@ -19,7 +19,6 @@ import (
 const (
 	hostAuthList = "host.auth.list"
 	hostAuthGet  = "host.auth.get"
-	hostHTTPDo   = "host.http.do"
 )
 
 const xaiGrokClientVersion = "1.0.44"
@@ -69,23 +68,6 @@ type authFileListResponse struct {
 
 type hostAuthListResponse struct {
 	Files []hostAuthFile `json:"files"`
-}
-
-type hostAuthGetResponse struct {
-	JSON json.RawMessage `json:"json"`
-}
-
-type hostHTTPRequest struct {
-	HostCallbackID string      `json:"host_callback_id,omitempty"`
-	Method         string      `json:"method"`
-	URL            string      `json:"url"`
-	Headers        http.Header `json:"headers,omitempty"`
-	Body           []byte      `json:"body,omitempty"`
-}
-
-type hostHTTPResponse struct {
-	StatusCode int    `json:"StatusCode"`
-	Body       []byte `json:"Body"`
 }
 
 type quotaRow struct {
@@ -161,12 +143,12 @@ func (a *App) authQuotaReset(req ManagementRequest, access viewAccess) Managemen
 	if selected == nil {
 		return failure
 	}
-	var reset func(string, hostAuthFile, string) error
+	var reset func(*authQuotaClient, string) error
 	switch authCategory(selected.Type) {
 	case "codex":
-		reset = a.resetCodexQuota
+		reset = (*authQuotaClient).resetCodexQuota
 	case "claude":
-		reset = a.resetClaudeQuota
+		reset = (*authQuotaClient).resetClaudeQuota
 	default:
 		return viewJSONError(access, http.StatusUnprocessableEntity, "unsupported", "Quota resets are not supported for this auth file type")
 	}
@@ -177,7 +159,12 @@ func (a *App) authQuotaReset(req ManagementRequest, access viewAccess) Managemen
 	if !req.Query.Has("auth_revision") || req.Query.Get("auth_revision") != authFileRevision(*selected) || req.Query.Get("auth_name") != name {
 		return viewJSONError(access, http.StatusConflict, "auth_file_changed", "Auth file changed; refresh the auth file list and try again")
 	}
-	if errReset := reset(req.HostCallbackID, *selected, resetID); errReset != nil {
+	client, errClient := a.openAuthQuotaClient(req.HostCallbackID, *selected)
+	if errClient != nil {
+		return viewDetailedError(access, http.StatusBadGateway, "reset_failed", errClient)
+	}
+	defer client.close()
+	if errReset := reset(client, resetID); errReset != nil {
 		return viewDetailedError(access, http.StatusBadGateway, "reset_failed", errReset)
 	}
 	// Refresh separately so a failed query cannot obscure a successful reset.
@@ -364,84 +351,46 @@ func authCategoryOrder(category string) int {
 	}
 }
 
-func (a *App) readAuthCredential(file hostAuthFile) (map[string]any, error) {
-	raw, errGet := a.hostCaller(hostAuthGet, map[string]string{"auth_index": file.AuthIndex})
-	if errGet != nil {
-		return nil, messages.Errorf("Read auth file: %w", errGet)
-	}
-	var auth hostAuthGetResponse
-	if errDecode := json.Unmarshal(raw, &auth); errDecode != nil {
-		return nil, messages.Errorf("Parse auth file: %w", errDecode)
-	}
-	var credential map[string]any
-	if errDecode := json.Unmarshal(auth.JSON, &credential); errDecode != nil {
-		return nil, messages.Errorf("Invalid auth file contents")
-	}
-	if credentialUsesAPIKey(credential) {
-		return nil, messages.Errorf("API key credentials do not support this quota query")
-	}
-	if credentialString(credential, "proxy_url", "proxyUrl") != "" {
-		return nil, messages.Errorf("Quota queries do not support a separate proxy for an auth file")
-	}
-	return credential, nil
-}
-
 func (a *App) fetchAuthQuota(callbackID string, file hostAuthFile, provider string) (authQuotaResponse, error) {
-	credential, errCredential := a.readAuthCredential(file)
-	if errCredential != nil {
-		return authQuotaResponse{}, errCredential
+	client, errClient := a.openAuthQuotaClient(callbackID, file)
+	if errClient != nil {
+		return authQuotaResponse{}, errClient
 	}
+	defer client.close()
+	credential := client.credential
 	result := authQuotaResponse{AuthRevision: authFileRevision(file), FetchedAt: time.Now().UTC(), Quota: []quotaRow{}}
 	if provider == "xai" && paidXAICredential(credential) {
 		result.Plan = "Paid"
 		return result, nil
 	}
-	token := credentialToken(credential)
-	if token == "" {
-		return authQuotaResponse{}, messages.Errorf("Auth file has no usable credentials")
-	}
 	var err error
 	switch provider {
 	case "codex":
-		if plan := credentialString(credential, "plan_type", "planType"); plan != "" {
-			result.Plan = codexPlanLabel(plan)
-		}
-		err = a.fetchCodexQuota(callbackID, token, credentialString(credential, "account_id", "accountId", "chatgpt_account_id", "chatgptAccountId"), &result)
+		err = client.fetchCodexQuota(&result)
 	case "claude":
-		err = a.fetchClaudeQuota(callbackID, token, &result)
+		err = client.fetchClaudeQuota(&result)
 	case "kimi":
-		err = a.fetchKimiQuota(callbackID, token, &result)
+		err = client.fetchKimiQuota(&result)
 	case "xai":
-		err = a.fetchXAIQuota(callbackID, token, credentialString(credential, "user_id", "userId", "xai_user_id", "xaiUserId", "sub", "subject"), &result)
+		err = client.fetchXAIQuota(&result)
 	case "antigravity":
 		projectID := firstNonEmptyString(file.ProjectID, credentialString(credential, "project_id", "projectId", "gemini_virtual_project"))
 		if projectID == "" {
 			return result, messages.Errorf("Auth file is missing project_id")
 		}
-		err = a.fetchAntigravityQuota(callbackID, token, projectID, &result)
+		err = client.fetchAntigravityQuota(projectID, &result)
 	}
-	if err != nil {
-		return result, err
-	}
-	return result, nil
+	return result, err
 }
 
-func (a *App) resetCodexQuota(callbackID string, file hostAuthFile, resetID string) error {
-	credential, errCredential := a.readAuthCredential(file)
-	if errCredential != nil {
-		return errCredential
-	}
-	token := credentialToken(credential)
-	if token == "" {
-		return messages.Errorf("Auth file has no usable credentials")
-	}
+func (c *authQuotaClient) resetCodexQuota(resetID string) error {
 	headers := http.Header{"User-Agent": {"codex_cli_rs/0.76.0"}}
-	if accountID := credentialString(credential, "account_id", "accountId", "chatgpt_account_id", "chatgptAccountId"); accountID != "" {
+	if accountID := credentialString(c.credential, "account_id", "accountId", "chatgpt_account_id", "chatgptAccountId"); accountID != "" {
 		headers.Set("Chatgpt-Account-Id", accountID)
 	}
-	_, errCall := a.upstreamCall(
-		callbackID, http.MethodPost, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume",
-		token, headers, map[string]string{"redeem_request_id": resetID},
+	_, errCall := c.upstreamCall(
+		http.MethodPost, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume",
+		headers, map[string]string{"redeem_request_id": resetID},
 	)
 	return errCall
 }
@@ -458,17 +407,9 @@ var (
 )
 
 // The claim re-reads the grants and spends one only when it is usable now.
-func (a *App) resetClaudeQuota(callbackID string, file hostAuthFile, resetID string) error {
-	credential, errCredential := a.readAuthCredential(file)
-	if errCredential != nil {
-		return errCredential
-	}
-	token := credentialToken(credential)
-	if token == "" {
-		return messages.Errorf("Auth file has no usable credentials")
-	}
+func (c *authQuotaClient) resetClaudeQuota(resetID string) error {
 	headers := http.Header{"Anthropic-Beta": {"oauth-2025-04-20"}}
-	profile, errProfile := a.upstream(callbackID, http.MethodGet, "https://api.anthropic.com/api/oauth/profile", token, headers, nil)
+	profile, errProfile := c.upstream(http.MethodGet, "https://api.anthropic.com/api/oauth/profile", headers, nil)
 	if errProfile != nil {
 		return errProfile
 	}
@@ -476,7 +417,7 @@ func (a *App) resetClaudeQuota(callbackID string, file hostAuthFile, resetID str
 	if !claudeOrganizationPattern.MatchString(organization) {
 		return messages.Errorf("Invalid upstream response")
 	}
-	status, errStatus := a.claudeResetStatus(callbackID, token, headers)
+	status, errStatus := c.claudeResetStatus(headers)
 	if errStatus != nil {
 		return errStatus
 	}
@@ -484,9 +425,9 @@ func (a *App) resetClaudeQuota(callbackID string, file hostAuthFile, resetID str
 	if errGrant != nil {
 		return errGrant
 	}
-	response, errClaim := a.upstreamCall(
-		callbackID, http.MethodPost, "https://api.anthropic.com/api/organizations/"+organization+"/reset_rate_limits",
-		token, headers, map[string]string{"program": "cedar_ember", "grant_id": grantID, "request_id": resetID},
+	response, errClaim := c.upstreamCall(
+		http.MethodPost, "https://api.anthropic.com/api/organizations/"+organization+"/reset_rate_limits",
+		headers, map[string]string{"program": "cedar_ember", "grant_id": grantID, "request_id": resetID},
 	)
 	if errClaim != nil {
 		return errClaim
@@ -504,8 +445,8 @@ func (a *App) resetClaudeQuota(callbackID string, file hostAuthFile, resetID str
 	return messages.Errorf("Claude did not confirm the reset")
 }
 
-func (a *App) claudeResetStatus(callbackID, token string, headers http.Header) (claudeResetStatus, error) {
-	object, errCall := a.upstream(callbackID, http.MethodGet, "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1", token, headers, nil)
+func (c *authQuotaClient) claudeResetStatus(headers http.Header) (claudeResetStatus, error) {
+	object, errCall := c.upstream(http.MethodGet, "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1", headers, nil)
 	if errCall != nil {
 		return claudeResetStatus{}, errCall
 	}
@@ -622,80 +563,13 @@ func strictTime(object map[string]any, key string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (a *App) upstream(callbackID, method, endpoint, token string, headers http.Header, body any) (map[string]any, error) {
-	object, errCall := a.upstreamCall(callbackID, method, endpoint, token, headers, body)
-	if errCall != nil {
-		return nil, errCall
-	}
-	if object == nil {
-		return nil, messages.Errorf("Invalid upstream response")
-	}
-	return object, nil
-}
-
-// Reset responses may be empty even when successful.
-func (a *App) upstreamCall(callbackID, method, endpoint, token string, headers http.Header, body any) (map[string]any, error) {
-	if headers == nil {
-		headers = make(http.Header)
-	}
-	headers.Set("Authorization", "Bearer "+token)
-	var rawBody []byte
-	if body != nil {
-		headers.Set("Content-Type", "application/json")
-		var errMarshal error
-		rawBody, errMarshal = json.Marshal(body)
-		if errMarshal != nil {
-			return nil, messages.Errorf("Build quota request: %w", errMarshal)
-		}
-	}
-	raw, errCall := a.hostCaller(hostHTTPDo, hostHTTPRequest{
-		HostCallbackID: callbackID, Method: method, URL: endpoint, Headers: headers, Body: rawBody,
-	})
-	if errCall != nil {
-		return nil, messages.Errorf("Quota request failed: %s", redactSecret(errCall.Error(), token))
-	}
-	var response hostHTTPResponse
-	if errDecode := json.Unmarshal(raw, &response); errDecode != nil {
-		return nil, messages.Errorf("Parse quota response: %w", errDecode)
-	}
-	var object map[string]any
-	if len(response.Body) > 0 {
-		_ = json.Unmarshal(response.Body, &object)
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		message := redactSecret(upstreamErrorMessage(object), token)
-		if response.StatusCode == http.StatusUnauthorized {
-			if message != "" {
-				return nil, messages.Errorf("Upstream returned HTTP %d: Credentials are invalid or expired: %s", response.StatusCode, message)
-			}
-			return nil, messages.Errorf("Upstream returned HTTP %d: Credentials are invalid or expired", response.StatusCode)
-		}
-		if message == "" {
-			message = http.StatusText(response.StatusCode)
-		}
-		return nil, messages.Errorf("Upstream returned HTTP %d: %s", response.StatusCode, message)
-	}
-	return object, nil
-}
-
-func upstreamErrorMessage(object map[string]any) string {
-	message := firstString(object, "message", "error_description")
-	if nested := objectMap(object, "error"); nested != nil {
-		message = firstNonEmptyString(firstString(nested, "message", "detail"), message)
-	}
-	message = strings.Join(strings.Fields(message), " ")
-	if len(message) > 500 {
-		message = message[:500] + "…"
-	}
-	return message
-}
-
-func (a *App) fetchCodexQuota(callbackID, token, accountID string, result *authQuotaResponse) error {
+func (c *authQuotaClient) fetchCodexQuota(result *authQuotaResponse) error {
+	result.Plan = codexPlanLabel(credentialString(c.credential, "plan_type", "planType"))
 	headers := http.Header{"User-Agent": {"codex_cli_rs/0.76.0"}, "Content-Type": {"application/json"}}
-	if accountID != "" {
+	if accountID := credentialString(c.credential, "account_id", "accountId", "chatgpt_account_id", "chatgptAccountId"); accountID != "" {
 		headers.Set("Chatgpt-Account-Id", accountID)
 	}
-	object, errCall := a.upstream(callbackID, http.MethodGet, "https://chatgpt.com/backend-api/wham/usage", token, headers, nil)
+	object, errCall := c.upstream(http.MethodGet, "https://chatgpt.com/backend-api/wham/usage", headers, nil)
 	if errCall != nil {
 		return errCall
 	}
@@ -722,7 +596,7 @@ func (a *App) fetchCodexQuota(callbackID, token, accountID string, result *authQ
 	headers.Set("Accept", "application/json")
 	headers.Set("OpenAI-Beta", "codex-1")
 	headers.Set("Originator", "Codex Desktop")
-	credits, err := a.upstream(callbackID, http.MethodGet, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", token, headers, nil)
+	credits, err := c.upstream(http.MethodGet, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", headers, nil)
 	details := normalizeCodexResetCredits(credits)
 	result.RateLimitResetCreditsUnavailable = err != nil || details.invalidPayload
 	if result.RateLimitResetCreditsUnavailable {
@@ -862,9 +736,9 @@ func claudeFableLimit(usage map[string]any) map[string]any {
 	return fallback
 }
 
-func (a *App) fetchClaudeQuota(callbackID, token string, result *authQuotaResponse) error {
+func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 	headers := http.Header{"Anthropic-Beta": {"oauth-2025-04-20"}, "Content-Type": {"application/json"}}
-	usage, errCall := a.upstream(callbackID, http.MethodGet, "https://api.anthropic.com/api/oauth/usage", token, headers, nil)
+	usage, errCall := c.upstream(http.MethodGet, "https://api.anthropic.com/api/oauth/usage", headers, nil)
 	if errCall != nil {
 		return errCall
 	}
@@ -908,14 +782,14 @@ func (a *App) fetchClaudeQuota(callbackID, token string, result *authQuotaRespon
 			result.Quota = append(result.Quota, row)
 		}
 	}
-	if status, errStatus := a.claudeResetStatus(callbackID, token, headers); errStatus == nil {
+	if status, errStatus := c.claudeResetStatus(headers); errStatus == nil {
 		count := 0
 		for _, grant := range status.grants {
 			count += grant.left
 		}
 		result.RateLimitResetCreditsAvailableCount = &count
 	}
-	if profile, errProfile := a.upstream(callbackID, http.MethodGet, "https://api.anthropic.com/api/oauth/profile", token, headers, nil); errProfile == nil {
+	if profile, errProfile := c.upstream(http.MethodGet, "https://api.anthropic.com/api/oauth/profile", headers, nil); errProfile == nil {
 		account, organization := objectMap(profile, "account"), objectMap(profile, "organization")
 		max, hasMax := boolValue(account, "has_claude_max", "hasClaudeMax")
 		pro, hasPro := boolValue(account, "has_claude_pro", "hasClaudePro")
@@ -936,8 +810,8 @@ func (a *App) fetchClaudeQuota(callbackID, token string, result *authQuotaRespon
 	return nil
 }
 
-func (a *App) fetchKimiQuota(callbackID, token string, result *authQuotaResponse) error {
-	usage, errCall := a.upstream(callbackID, http.MethodGet, "https://api.kimi.com/coding/v1/usages", token, nil, nil)
+func (c *authQuotaClient) fetchKimiQuota(result *authQuotaResponse) error {
+	usage, errCall := c.upstream(http.MethodGet, "https://api.kimi.com/coding/v1/usages", nil, nil)
 	if errCall != nil {
 		return errCall
 	}
@@ -982,18 +856,18 @@ func (a *App) fetchKimiQuota(callbackID, token string, result *authQuotaResponse
 	return nil
 }
 
-func (a *App) fetchXAIQuota(callbackID, token, userID string, result *authQuotaResponse) error {
+func (c *authQuotaClient) fetchXAIQuota(result *authQuotaResponse) error {
 	headers := http.Header{
 		"X-Xai-Token-Auth":      {"xai-grok-cli"},
 		"X-Grok-Client-Version": {xaiGrokClientVersion},
 		"User-Agent":            {"grok-pager/" + xaiGrokClientVersion + " grok-shell/" + xaiGrokClientVersion},
 		"Accept":                {"*/*"},
 	}
-	if userID != "" {
+	if userID := credentialString(c.credential, "user_id", "userId", "xai_user_id", "xaiUserId", "sub", "subject"); userID != "" {
 		headers.Set("X-Userid", userID)
 	}
-	weekly, weeklyErr := a.upstream(callbackID, http.MethodGet, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", token, headers.Clone(), nil)
-	monthly, monthlyErr := a.upstream(callbackID, http.MethodGet, "https://cli-chat-proxy.grok.com/v1/billing", token, headers.Clone(), nil)
+	weekly, weeklyErr := c.upstream(http.MethodGet, "https://cli-chat-proxy.grok.com/v1/billing?format=credits", headers.Clone(), nil)
+	monthly, monthlyErr := c.upstream(http.MethodGet, "https://cli-chat-proxy.grok.com/v1/billing", headers.Clone(), nil)
 	if weeklyErr != nil && monthlyErr != nil {
 		return weeklyErr
 	}
@@ -1082,12 +956,12 @@ func (a *App) fetchXAIQuota(callbackID, token, userID string, result *authQuotaR
 	return nil
 }
 
-func (a *App) fetchAntigravityQuota(callbackID, token, projectID string, result *authQuotaResponse) error {
+func (c *authQuotaClient) fetchAntigravityQuota(projectID string, result *authQuotaResponse) error {
 	headers := http.Header{"User-Agent": {"antigravity/cli/1.0.13"}}
 	var quota map[string]any
 	var lastErr error
 	for _, endpoint := range []string{"https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary", "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary", "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"} {
-		value, err := a.upstream(callbackID, http.MethodPost, endpoint, token, headers.Clone(), map[string]string{"project": projectID})
+		value, err := c.upstream(http.MethodPost, endpoint, headers.Clone(), map[string]string{"project": projectID})
 		if err != nil {
 			lastErr = err
 			continue
@@ -1147,7 +1021,7 @@ func (a *App) fetchAntigravityQuota(callbackID, token, projectID string, result 
 		result.Quota = append(result.Quota, groupRows...)
 	}
 	for _, endpoint := range []string{"https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist", "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"} {
-		subscription, err := a.upstream(callbackID, http.MethodPost, endpoint, token, headers.Clone(), map[string]any{"metadata": map[string]string{"ideType": "ANTIGRAVITY"}})
+		subscription, err := c.upstream(http.MethodPost, endpoint, headers.Clone(), map[string]any{"metadata": map[string]string{"ideType": "ANTIGRAVITY"}})
 		if err != nil {
 			continue
 		}

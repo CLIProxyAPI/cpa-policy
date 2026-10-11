@@ -389,8 +389,8 @@
     "key": "backend.api_key_credentials_do_not_support_this_quota_query",
     "formats": []
   },
-  "Quota queries do not support a separate proxy for an auth file": {
-    "key": "backend.quota_queries_do_not_support_a_separate_proxy_for_an_auth_file",
+  "Invalid auth file proxy": {
+    "key": "backend.invalid_auth_file_proxy",
     "formats": []
   },
   "Auth file has no usable credentials": {

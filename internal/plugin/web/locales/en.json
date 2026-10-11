@@ -575,7 +575,7 @@
   "backend.parse_auth_file_value": "Parse auth file: {v0}",
   "backend.invalid_auth_file_contents": "Invalid auth file contents",
   "backend.api_key_credentials_do_not_support_this_quota_query": "API key credentials do not support this quota query",
-  "backend.quota_queries_do_not_support_a_separate_proxy_for_an_auth_file": "Quota queries do not support a separate proxy for an auth file",
+  "backend.invalid_auth_file_proxy": "Invalid auth file proxy",
   "backend.auth_file_has_no_usable_credentials": "Auth file has no usable credentials",
   "backend.auth_file_is_missing_project_id": "Auth file is missing project_id",
   "backend.build_quota_request_value": "Build quota request: {v0}",
