@@ -226,10 +226,7 @@ func (a *App) analysis(req ManagementRequest, access viewAccess) ManagementRespo
 	if !access.APIKey {
 		query.KeyScope, query.KeyScopeEmpty = keyScopeFilter(req.Query)
 	}
-	if err := timeParam(req.Query, "from", &query.From); err != nil {
-		return viewErrorResponse(access, err)
-	}
-	if err := timeParam(req.Query, "to", &query.To); err != nil {
+	if err := timeRangeParams(req.Query, &query.From, &query.To); err != nil {
 		return viewErrorResponse(access, err)
 	}
 	if name := strings.TrimSpace(req.Query.Get("timezone")); name != "" {
@@ -272,14 +269,8 @@ func requestPageParams(values url.Values, offset, limit *int, from, to *time.Tim
 	if errLimit := countParam(values, "limit", limit); errLimit != nil {
 		return errLimit
 	}
-	if errFrom := timeParam(values, "from", from); errFrom != nil {
-		return errFrom
-	}
-	if errTo := timeParam(values, "to", to); errTo != nil {
-		return errTo
-	}
-	if !from.IsZero() && !to.IsZero() && !from.Before(*to) {
-		return &billing.Error{Kind: billing.KindInvalid, Msg: "Start time must be earlier than end time"}
+	if err := timeRangeParams(values, from, to); err != nil {
+		return err
 	}
 	if *limit < 1 || *limit > maxEventPageSize {
 		return &billing.Error{Kind: billing.KindInvalid, Msg: "Limit must be an integer from 1 to 1000"}
@@ -298,6 +289,19 @@ func timeParam(query url.Values, name string, target *time.Time) error {
 		return &billing.Error{Kind: billing.KindInvalid, Msg: detail.Text, Detail: detail}
 	}
 	*target = parsed
+	return nil
+}
+
+func timeRangeParams(query url.Values, from, to *time.Time) error {
+	if err := timeParam(query, "from", from); err != nil {
+		return err
+	}
+	if err := timeParam(query, "to", to); err != nil {
+		return err
+	}
+	if !from.IsZero() && !to.IsZero() && !from.Before(*to) {
+		return &billing.Error{Kind: billing.KindInvalid, Msg: "Start time must be earlier than end time"}
+	}
 	return nil
 }
 
@@ -362,14 +366,8 @@ func protectAPIKeyResponse(access viewAccess, response ManagementResponse, handl
 
 func (a *App) eventKeys(req ManagementRequest) ManagementResponse {
 	var from, to time.Time
-	if err := timeParam(req.Query, "from", &from); err != nil {
+	if err := timeRangeParams(req.Query, &from, &to); err != nil {
 		return errorResponse(err)
-	}
-	if err := timeParam(req.Query, "to", &to); err != nil {
-		return errorResponse(err)
-	}
-	if !from.IsZero() && !to.IsZero() && !from.Before(to) {
-		return JSONError(http.StatusBadRequest, "invalid", "Start time must be earlier than end time")
 	}
 	keys, err := a.store.EventKeys(from, to)
 	if err != nil {

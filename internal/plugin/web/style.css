@@ -476,7 +476,7 @@ tbody tr:hover { background: var(--bg-hover); }
 :root .page-navigation button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
 .page-tab-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .page-tab-actions > button { flex: none; }
-.shared-time-filter { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.shared-time-filter { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
 .tag {
   display: inline-flex;
   align-items: center;
@@ -1116,7 +1116,8 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
 .auth-usage-metric { display: grid; gap: 3px; min-width: 0; }
 .auth-usage-label { display: none; color: var(--text-tertiary); font-size: 11px; }
 .auth-usage-detail { display: flex; align-items: baseline; gap: 4px; margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
-.auth-usage-value { color: var(--text-primary); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.auth-usage-value { color: var(--text-primary); font-size: 13px; font-variant-numeric: tabular-nums; }
+.auth-usage-value, .auth-usage-detail-label, .auth-usage-detail-value { white-space: nowrap; }
 .auth-file-head { display: flex; align-items: center; gap: 10px; min-width: 0; width: max-content; max-width: 100%; }
 .auth-file-identity { min-width: 0; max-width: 280px; flex: 1; }
 .auth-file-email-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1638,7 +1639,7 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  width: 100%;
+  max-width: 100%;
   min-width: 0;
   white-space: nowrap;
 }
@@ -2095,9 +2096,7 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   .usage-distribution-chart { width: min(240px, 75vw); height: min(240px, 75vw); }
 }
 @media (max-width: 640px) {
-  /* The icon-only export leaves the rest of the line for equally sized filters. */
-  .shared-time-filter, .shared-time-filter > * { flex: 1 1 0; }
-  .shared-time-filter > .native-select { max-width: none; }
+  .shared-time-filter > .native-select { flex: 0 1 auto; min-width: 0; }
   .shared-time-filter > .native-select > select { width: 100%; padding-left: 8px; padding-right: 26px; }
   .shared-time-filter > .native-select::after { right: 6px; width: 16px; height: 16px; }
   .time-range-trigger { --button-padding-inline: 8px; gap: 6px; }

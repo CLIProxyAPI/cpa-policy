@@ -12,16 +12,14 @@ const resources = {
     credentials: m("ui.credential_catalog"),
     models: m("ui.model_catalog"),
     catalog: m("ui.model_prices"),
-    priceStatus: m("ui.reference_price_status"),
-    authFiles: m("ui.auth_files")
+    priceStatus: m("ui.reference_price_status")
   }),
   account: dataEntries({
     profile: m("ui.account_profile"),
     subscription: m("ui.subscription"),
     routing: m("ui.access_permissions"),
     models: m("ui.model_catalog"),
-    catalog: m("ui.model_prices"),
-    authFiles: m("ui.auth_files")
+    catalog: m("ui.model_prices")
   })
 };
 // Key metadata is shared by configuration, event queries, and analysis.
@@ -64,8 +62,7 @@ const keyDirectory = {
 const resourceGroups = {
   admin: {
     configuration: { names: ["keys", "plans", "routes", "credentials", "models"], syncErrors: [] },
-    pricing: { names: ["catalog", "priceStatus"], after: "configuration" },
-    authFiles: { names: ["authFiles"] }
+    pricing: { names: ["catalog", "priceStatus"], after: "configuration" }
   },
   account: {
     ...Object.fromEntries(Object.keys(resources.account).map((name) => [name, { names: [name] }])),
@@ -126,6 +123,15 @@ function createQuery(label, receive = (value) => value) {
 }
 
 const analysisQueries = Object.fromEntries(["admin", "account"].map((role) => [role, createQuery(m("ui.analysis"))]));
+const authFilesQueries = Object.fromEntries(
+  ["admin", "account"].map((role) => [
+    role,
+    createQuery(m("ui.auth_files"), (files) => {
+      updateAuthFiles(role === "account", files);
+      return files;
+    })
+  ])
+);
 const eventKeysQuery = createQuery(m("ui.event_api_key_filter"));
 const UNASSIGNED_KEY = "__unassigned__";
 
@@ -594,20 +600,17 @@ function loadDataGroup(account, name, reload = false) {
     };
     if (account) {
       await read(name, () =>
-        name === "authFiles"
-          ? fetchAuthFiles(true)
-          : name === "models" ? fetchModels(true, authKey) : name === "catalog" ? fetchCatalog(true) : fetchAccountData(name)
+        name === "models" ? fetchModels(true, authKey) : name === "catalog" ? fetchCatalog(true) : fetchAccountData(name)
       );
     } else if (name === "configuration") { group.syncErrors = await readAdminConfiguration(read); } else if (name === "pricing") {
       await settleLoads([
         read("catalog", () => fetchCatalog(false)),
         read("priceStatus", async () => requireObject(await plugin("GET", "/prices/reference/status"), m("ui.reference_price_status")))
       ]);
-    } else { await read("authFiles", () => fetchAuthFiles(false)); }
+    }
     if (generation !== sessionGeneration) throw new StaleRequestError();
     if (account && name !== "profile" && !resources.account.profile.value?.tracked) return;
     if (values.keys) values.keys = keyDirectory.receive(values.keys, identityRevision);
-    if (values.authFiles) updateAuthFiles(account, values.authFiles);
     for (const [key, value] of Object.entries(values)) Object.assign(resources[role][key], { value, error: "" });
     for (const { key, error } of failures) resources[role][key].error = error.message || String(error);
     for (const key of group.names) resources[role][key].readAt = Date.now();
@@ -616,6 +619,7 @@ function loadDataGroup(account, name, reload = false) {
         if (key !== "profile") Object.assign(resource, { value: null, error: "", readAt: 0 });
       }
       analysisQueries.account.clear();
+      authFilesQueries.account.clear();
       for (const list of Object.values(pagedLists.account)) list.reset();
       resetAuthQuotaMemory(true);
       persistAuthQuotaCache(true);
@@ -638,6 +642,7 @@ function createPages(role) {
   const data = {
     ...resources[role],
     analysis: analysisQueries[role],
+    authFiles: authFilesQueries[role],
     eventKeys: eventKeysQuery,
     keyDirectory,
     ...Object.fromEntries(Object.entries(pagedLists[role]).map(([name, list]) => [name, list.query]))
@@ -645,10 +650,31 @@ function createPages(role) {
   const section = (names, render) => ({ sources: names.map((name) => data[name]), render, displayed: null });
   const keyedSection = (names, render) => section(account ? names : [...names, "keyDirectory"], render);
   const result = {
-    analysis: { query: "analysis", sections: [] },
-    "request-events": { query: "events", sections: [keyedSection(["events"], () => renderRequestEvents(account))] },
-    errors: { query: "errors", sections: [keyedSection(["errors"], () => renderErrors(account))] },
-    "auth-files": { sections: [section(["authFiles"], () => renderAuthFiles(account))] }
+    analysis: {
+      timeRange: true,
+      query: data.analysis,
+      load: (reload) => loadAnalysis(account, reload),
+      renderStatus: () => renderAnalysis(account),
+      sections: []
+    },
+    "request-events": {
+      timeRange: true,
+      exportEvents: true,
+      list: pagedLists[role].events,
+      sections: [keyedSection(["events"], () => renderRequestEvents(account))]
+    },
+    errors: {
+      timeRange: true,
+      exportEvents: true,
+      list: pagedLists[role].errors,
+      sections: [keyedSection(["errors"], () => renderErrors(account))]
+    },
+    "auth-files": {
+      timeRange: true,
+      query: data.authFiles,
+      load: (reload) => readAuthFiles(account, reload),
+      sections: [section(["authFiles"], () => renderAuthFiles(account))]
+    }
   };
   if (account) {
     result.subscription = {
@@ -664,7 +690,7 @@ function createPages(role) {
     result.keys = { editors: ["route"], sections: [keyedSection(["keys", "plans", "routes", "credentials"], renderKeys)] };
     result.settings = {
       editors: ["plan", "route"],
-      query: "logs",
+      list: pagedLists[role].logs,
       sections: [
         keyedSection(["plans", "keys"], renderPlans),
         keyedSection(["routes", "keys", "credentials"], renderRoutes),
@@ -675,12 +701,16 @@ function createPages(role) {
     };
   }
   for (const page of Object.values(result)) {
-    page.sources = [...new Set(page.sections.flatMap((section) => section.sources))];
+    if (page.list) {
+      page.query = page.list.query;
+      page.load = page.list.load;
+      page.renderStatus = () => { if (page.list.data) page.list.renderStatus(); };
+    }
+    page.sources = [...new Set([...page.sections.flatMap((section) => section.sources), ...(page.query ? [page.query] : [])])];
     for (const editor of page.editors || []) {
       for (const name of EDITOR_RESOURCES[editor]) if (!page.sources.includes(data[name])) page.sources.push(data[name]);
     }
     if (page.sources.includes(data.catalog) && !page.sources.includes(data.models)) page.sources.push(data.models);
-    if (page.query === "analysis") page.sources.push(data.analysis);
     page.groups = Object.entries(resourceGroups[role]).filter(([, group]) => group.names.some((name) => page.sources.includes(data[name])))
       .map(([name]) => name);
     if (account) page.sources.unshift(data.profile);
@@ -707,13 +737,7 @@ function renderPage() {
     if (section.displayed?.every((value, index) => value === values[index])) continue;
     if (section.render() !== false) section.displayed = values;
   }
-  // Charts also depend on theme and library availability, and retain
-  // their own canvas/update state across navigation and resizing.
-  if (page.query === "analysis") renderAnalysis(account);
-  else if (page.query) {
-    const list = pagedList(page.query, account);
-    if (list.data) list.renderStatus();
-  }
+  page.renderStatus?.();
 }
 
 function loadPage(account, { reload = false } = {}) {
@@ -727,13 +751,7 @@ function loadPage(account, { reload = false } = {}) {
     if (!account || resources.account.profile.value?.tracked) {
       tasks.push(...page.groups.map((name) => loadDataGroup(account, name, reload)));
       if (page.sources.includes(eventKeysQuery)) tasks.push(readEventKeys(reload));
-      if (page.query === "analysis") {
-        tasks.push(readAnalysis(account, reload));
-        if (typeof Chart !== "function" && (!chartError || reload)) tasks.push(loadCharts());
-      } else if (page.query) {
-        const list = pagedList(page.query, account);
-        tasks.push(list.load(reload));
-      }
+      if (page.load) tasks.push(page.load(reload));
     }
     renderPage();
     try { await settleLoads(tasks); } catch (error) {
@@ -756,7 +774,7 @@ function renderDataNotice() {
   if (!page) return;
   const account = currentRole === "account";
   // Paged lists display their own loading and error states.
-  const listQuery = pagedLists[currentRole][page.query]?.query;
+  const listQuery = page.list?.query;
   const visible = page.sources.filter((source) => source !== listQuery);
   const errors = visible.filter((source) => source.error).map((source) =>
     m("ui.resource_error", {

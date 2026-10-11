@@ -73,7 +73,7 @@ function authUI(account) {
   const prefix = account ? "account-auth" : "auth";
   return {
     owner: account ? accountUIState : adminUIState,
-    files: resources[account ? "account" : "admin"].authFiles,
+    files: authFilesQueries[account ? "account" : "admin"],
     body: $(prefix + "-files-body"),
     enabledOnly: $(prefix + "-enabled-only"),
     provider: $(prefix + "-provider"),
@@ -91,6 +91,7 @@ function resetAuthQuotaMemory(account) {
   owner.authQuotas.clear();
   owner.authQuotaLoading.clear();
   owner.authQuotaErrors.clear();
+  owner.authFileRevisions.clear();
   resetAuthQuotaBatch(account);
 }
 
@@ -145,9 +146,17 @@ async function activateCredentialScope(account, credential) {
   }
 }
 
-async function fetchAuthFiles(account) {
-  const result = await (account ? accountAPI("/auth-files") : plugin("GET", "/auth-files"));
-  return requireArray(result?.files, m("ui.auth_files"));
+function readAuthFiles(account, reload = false) {
+  const role = account ? "account" : "admin";
+  const path = "/auth-files?" + new URLSearchParams(selectedRange(account));
+  return authFilesQueries[role].read(
+    JSON.stringify(sharedTimeRanges[role]),
+    async () => {
+      const result = await (account ? accountAPI(path) : plugin("GET", path));
+      return requireArray(result?.files, m("ui.auth_files"));
+    },
+    reload
+  );
 }
 
 function updateAuthFiles(account, files) {
@@ -157,7 +166,7 @@ function updateAuthFiles(account, files) {
   for (const file of files)
     if (owner.authStatusSubmissions?.has(file.auth_index)) file.disabled = owner.authStatusSubmissions.get(file.auth_index);
   const byIndex = new Map(files.map((file) => [file.auth_index, file]));
-  const previous = new Map((resources[role].authFiles.value || []).map((file) => [file.auth_index, file.cache_revision || ""]));
+  const previous = owner.authFileRevisions;
   const changed = new Set(
     files.filter((file) => previous.has(file.auth_index) && previous.get(file.auth_index) !== (file.cache_revision || ""))
       .map((file) => file.auth_index)
@@ -169,6 +178,7 @@ function updateAuthFiles(account, files) {
     return !!file.cache_revision && !!result && result.auth_revision !== file.cache_revision;
   };
   const stale = [...owner.authQuotas.keys(), ...owner.authQuotaErrors.keys(), ...owner.authQuotaLoading].some(staleIndex);
+  owner.authFileRevisions = new Map(files.map((file) => [file.auth_index, file.cache_revision || ""]));
   if (!stale) return;
   authQuotaGeneration[role]++;
   resetAuthQuotaBatch(account);
@@ -181,10 +191,7 @@ function updateAuthFiles(account, files) {
 function authQuotaCacheCurrent(account, owner, generation, index) {
   const role = account ? "account" : "admin";
   const currentOwner = account ? accountUIState : adminUIState;
-  return (
-    owner === currentOwner && generation === authQuotaGeneration[role] &&
-    (resources[role].authFiles.value || []).some((file) => file.auth_index === index)
-  );
+  return owner === currentOwner && generation === authQuotaGeneration[role] && owner.authFileRevisions.has(index);
 }
 
 function filteredAuthFiles(account) {
@@ -357,7 +364,7 @@ function renderAuthFiles(account) {
   renderCollection(ui.body, files, {
     headers: [
       m("ui.auth_files"),
-      m("ui.auth_requests_30_days"),
+      m("ui.requests"),
       m("ui.auth_total_tokens"),
       m("ui.cache_rate"),
       { label: m("ui.quota"), class: "auth-quota-column" },
@@ -522,8 +529,8 @@ async function setAuthFileEnabled(file, enabled) {
   }
   try {
     // A list read already in flight started before this change, so only the next read confirms it.
-    await resourceGroups.admin.authFiles.task?.catch(() => {});
-    await loadDataGroup(false, "authFiles", true);
+    await authFilesQueries.admin.task?.catch(() => {});
+    await readAuthFiles(false, true);
   } finally {
     owner.authStatusSubmissions.delete(file.auth_index);
     if (owner === adminUIState) renderAuthFiles(false);

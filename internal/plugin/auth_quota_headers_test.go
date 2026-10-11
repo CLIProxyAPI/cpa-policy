@@ -57,7 +57,7 @@ func TestUsageQuotaPersistsPartialWindowsAndScopedStatistics(t *testing.T) {
 		}
 		return json.RawMessage(`{"files":[{"auth_index":"credential-1","name":"dummy.json","type":"codex"}]}`), nil
 	})
-	files, err := app.listAuthFiles(viewAccess{})
+	files, err := app.listAuthFiles(viewAccess{}, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestUsageQuotaPersistsPartialWindowsAndScopedStatistics(t *testing.T) {
 		quota.Quota[0].ResetAt != at.Add(30*time.Minute).UTC().Format(time.RFC3339) {
 		t.Fatalf("partial or late quota report changed windows: %+v", quota.Quota)
 	}
-	files, err = app.listAuthFiles(viewAccess{APIKey: true, Scope: billing.CallerScope("sk-dummy-one")})
+	files, err = app.listAuthFiles(viewAccess{APIKey: true, Scope: billing.CallerScope("sk-dummy-one")}, time.Time{}, time.Time{})
 	if err != nil || files[0].Usage.Requests != 1 || files[0].Usage.Failed != 0 || files[0].Quota == nil {
 		t.Fatalf("scoped view: %+v, err: %v", files, err)
 	}

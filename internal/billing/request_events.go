@@ -36,6 +36,22 @@ type RequestEvent struct {
 
 const RequestEventRetention = 365 * 24 * time.Hour
 
+func usageTimeRange(from, to, now time.Time) (time.Time, time.Time, error) {
+	if to.IsZero() || to.After(now) {
+		to = now
+	}
+	if from.IsZero() {
+		from = to.Add(-30 * 24 * time.Hour)
+	}
+	if cutoff := now.Add(-RequestEventRetention); from.Before(cutoff) {
+		from = cutoff
+	}
+	if !from.Before(to) {
+		return time.Time{}, time.Time{}, invalidf("The time range is outside the retained request history")
+	}
+	return from, to, nil
+}
+
 // Source uses the event's account snapshot; key labels use their current values.
 type RequestEventRow struct {
 	RequestEvent

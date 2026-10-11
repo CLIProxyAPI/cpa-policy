@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-const CredentialUsagePeriod = 30 * 24 * time.Hour
-
 type CredentialUsageStats struct {
 	Requests        int64 `json:"requests"`
 	Failed          int64 `json:"failed"`
@@ -26,8 +24,12 @@ type CredentialUsage struct {
 	Quota []QuotaHeaderObservation
 }
 
-func (s *Store) CredentialUsage(authIndexes []string, scope string) (map[string]CredentialUsage, error) {
+func (s *Store) CredentialUsage(authIndexes []string, scope string, from, to time.Time) (map[string]CredentialUsage, error) {
+	from, to, err := usageTimeRange(from, to, s.Now())
+	if err != nil {
+		return nil, err
+	}
 	return withRepository(s, func(repo Repository) (map[string]CredentialUsage, error) {
-		return repo.CredentialUsage(authIndexes, scope, s.Now().Add(-CredentialUsagePeriod))
+		return repo.CredentialUsage(authIndexes, scope, from, to)
 	})
 }

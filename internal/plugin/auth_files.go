@@ -108,12 +108,19 @@ type resetCreditExpiry struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-func (a *App) authFiles(access viewAccess) ManagementResponse {
+func (a *App) authFiles(req ManagementRequest, access viewAccess) ManagementResponse {
 	if access.APIKey && !access.Tracked {
 		return apiKeyUnauthorized()
 	}
-	files, errList := a.listAuthFiles(access)
+	var from, to time.Time
+	if err := timeRangeParams(req.Query, &from, &to); err != nil {
+		return viewErrorResponse(access, err)
+	}
+	files, errList := a.listAuthFiles(access, from, to)
 	if errList != nil {
+		if billing.KindOf(errList) == billing.KindInvalid {
+			return viewErrorResponse(access, errList)
+		}
 		return viewDetailedError(access, http.StatusBadGateway, "host_unavailable", errList)
 	}
 	return viewJSON(access, http.StatusOK, authFileListResponse{Files: files})
@@ -218,7 +225,7 @@ func (a *App) resolveQuotaAuthFile(req ManagementRequest, access viewAccess) (*h
 	return selected, ManagementResponse{}
 }
 
-func (a *App) listAuthFiles(access viewAccess) ([]authFileView, error) {
+func (a *App) listAuthFiles(access viewAccess, from, to time.Time) ([]authFileView, error) {
 	files, errList := a.listHostAuthFiles()
 	if errList != nil {
 		return nil, errList
@@ -259,7 +266,7 @@ func (a *App) listAuthFiles(access viewAccess) ([]authFileView, error) {
 	if access.APIKey {
 		scope = access.Scope
 	}
-	usage, errUsage := a.store.CredentialUsage(indexes, scope)
+	usage, errUsage := a.store.CredentialUsage(indexes, scope, from, to)
 	if errUsage != nil {
 		return nil, errUsage
 	}

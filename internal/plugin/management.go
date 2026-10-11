@@ -92,7 +92,7 @@ var managementEndpoints = []managementEndpoint{
 	{http.MethodGet, routeAnalysis, "View usage distribution", func(a *App, req ManagementRequest) ManagementResponse { return a.analysis(req, viewAccess{}) }},
 	{http.MethodGet, routePluginLogs, "List plugin logs with pagination", (*App).listPluginLogs},
 	{http.MethodDelete, routePluginLogs, "Clear plugin logs", func(a *App, _ ManagementRequest) ManagementResponse { return a.clearPluginLogs() }},
-	{http.MethodGet, routeAuthFiles, "View auth files", func(a *App, _ ManagementRequest) ManagementResponse { return a.authFiles(viewAccess{}) }},
+	{http.MethodGet, routeAuthFiles, "View auth files", func(a *App, req ManagementRequest) ManagementResponse { return a.authFiles(req, viewAccess{}) }},
 	{http.MethodGet, routeAuthQuota, "Query auth file quotas", func(a *App, req ManagementRequest) ManagementResponse { return a.authQuota(req, viewAccess{}) }},
 	{http.MethodPost, routeAuthQuotaReset, "Reset auth file quotas", func(a *App, req ManagementRequest) ManagementResponse { return a.authQuotaReset(req, viewAccess{}) }},
 }
@@ -116,7 +116,7 @@ var resourceEndpoints = []resourceEndpoint{
 	{routeAnalysis, (*App).analysis},
 	{routeEvents, (*App).listRequestEvents},
 	{routeErrors, (*App).listRequestErrors},
-	{routeAuthFiles, func(a *App, _ ManagementRequest, access viewAccess) ManagementResponse { return a.authFiles(access) }},
+	{routeAuthFiles, (*App).authFiles},
 	{routeAuthQuota, (*App).authQuota},
 	{routeAuthQuotaReset, (*App).authQuotaReset},
 }

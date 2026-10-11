@@ -1,6 +1,6 @@
 {
-  "The analysis range is outside the retained request history": {
-    "key": "backend.the_analysis_range_is_outside_the_retained_request_history",
+  "The time range is outside the retained request history": {
+    "key": "backend.the_time_range_is_outside_the_retained_request_history",
     "formats": []
   },
   "API key identifier is required": {

@@ -184,6 +184,7 @@ function resetRoleData(role) {
     for (const section of page.sections) section.displayed = null;
   }
   analysisQueries[role].clear();
+  authFilesQueries[role].clear();
   if (!account) eventKeysQuery.clear();
   for (const list of Object.values(pagedLists[role])) list.reset();
   resetRoleControls(role);
@@ -255,6 +256,15 @@ for (const element of document.querySelectorAll(".head, #admin-data-status, #acc
   pageTabResizeObserver.observe(element, { box: "border-box" });
 }
 
+function updatePageControls(account, page) {
+  const prefix = account ? "account-" : "";
+  $(prefix + "shared-time-filter").classList.toggle("hidden", !page.timeRange);
+  $(prefix + "events-export").classList.toggle("hidden", !page.exportEvents);
+  if (!account) $("shared-key-filter").classList.toggle("hidden", !page.sources.includes(eventKeysQuery));
+  if (!page.timeRange) closeSharedTimePopover(account);
+  schedulePageTabLayout();
+}
+
 function setAccountTab(tab) {
   accountTab = ACCOUNT_TAB_IDS.includes(tab) ? tab : "subscription";
   writePageRoute("account", accountTab);
@@ -265,10 +275,7 @@ function setAccountTab(tab) {
   });
   $("account-page-tab-select").value = accountTab;
   for (const name of ACCOUNT_TAB_IDS) { $("account-tab-" + name).classList.toggle("hidden", name !== accountTab); }
-  $("account-shared-time-filter").classList.toggle("hidden", !["analysis", "request-events", "errors"].includes(accountTab));
-  $("account-events-export").classList.toggle("hidden", !["request-events", "errors"].includes(accountTab));
-  if (!["analysis", "request-events", "errors"].includes(accountTab)) { closeSharedTimePopover(true); }
-  schedulePageTabLayout();
+  updatePageControls(true, pages.account[accountTab]);
 }
 
 const TABS = Array.from(document.querySelectorAll(".tabs button[data-tab]"));
@@ -287,10 +294,7 @@ function setAdminTab(name) {
   for (const section of ["keys", "analysis", "plans", "routes", "prices", "request-events", "errors", "auth-files", "plugin-logs"]) {
     $("tab-" + section).classList.toggle("hidden", !visible.has(section));
   }
-  $("shared-time-filter").classList.toggle("hidden", !["analysis", "request-events", "errors"].includes(selected));
-  $("events-export").classList.toggle("hidden", !["request-events", "errors"].includes(selected));
-  if (!["analysis", "request-events", "errors"].includes(selected)) { closeSharedTimePopover(false); }
-  schedulePageTabLayout();
+  updatePageControls(false, pages.admin[selected]);
 }
 for (const tab of TABS)
   tab.onclick = () => {

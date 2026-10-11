@@ -18,7 +18,7 @@ type memoryRepository struct {
 	closeFail       error
 }
 
-func (r *memoryRepository) CredentialUsage(authIndexes []string, scope string, since time.Time) (map[string]CredentialUsage, error) {
+func (r *memoryRepository) CredentialUsage(authIndexes []string, scope string, from, to time.Time) (map[string]CredentialUsage, error) {
 	return map[string]CredentialUsage{}, r.fail
 }
 

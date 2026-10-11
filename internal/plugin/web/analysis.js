@@ -33,6 +33,12 @@ function renderLoadedCharts() {
   if (currentRole && activeTab(account) === "analysis" && analysisQueries[currentRole].value) renderAnalysis(account);
 }
 
+function loadAnalysis(account, reload) {
+  const tasks = [readAnalysis(account, reload)];
+  if (typeof Chart !== "function" && (!chartError || reload)) tasks.push(loadCharts());
+  return settleLoads(tasks);
+}
+
 function readAnalysis(account, reload) {
   const role = account ? "account" : "admin";
   const range = selectedRange(account);

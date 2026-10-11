@@ -444,13 +444,17 @@ AUTH_FILES.sort(
 )
 
 
-def auth_file_views(files):
+def auth_file_views(files, query, scope=""):
+    entries = filter_event_time([entry for entry in REQUEST_EVENTS if not scope or entry["scope"] == scope], query)
     views = []
     for index, item in enumerate(files):
+        rows = [entry for entry in entries if entry["auth_index"] == item["auth_index"]]
         view = {**item, "usage": {
-            "requests": 1200 + index * 213, "failed": 35 + index * 3,
-            "input_tokens": 82560000 + index * 1000000, "cache_read_tokens": 74200000,
-            "output_tokens": 756000,
+            "requests": len(rows), "failed": sum(bool(row.get("failed")) for row in rows),
+            "input_tokens": sum(sum(row["cost"].get(field, 0) for field in
+                                    ("uncached_input_tokens", "cache_read_tokens", "cache_write_tokens")) for row in rows),
+            "cache_read_tokens": sum(row["cost"].get("cache_read_tokens", 0) for row in rows),
+            "output_tokens": sum(row["cost"].get("billed_output_tokens", 0) for row in rows),
         }}
         if item["category"] in ("codex", "claude"):
             quota = auth_file_quota({"auth_index": [item["auth_index"]]})
@@ -765,12 +769,14 @@ def event_sample(
     long_context=False,
     failed=False,
     multiplier=1,
+    auth_index="",
 ):
     uncached, cache_read, cache_write, output = tokens
     if failed:
         uncached = cache_read = cache_write = output = 0
     return {
         "key_index": key_index,
+        "auth_index": auth_index,
         "source": source,
         "provider": provider,
         "executor_type": executor,
@@ -802,29 +808,29 @@ def event_sample(
 # Numeric usage and timing values are sampled from a real export. All identities
 # below are synthetic and intentionally unrelated to the source records.
 SUCCESS_EVENT_SAMPLES = [
-    event_sample(0, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexExecutor", "high", "priority", 11513, 8209, 266, (712, 91648, 4096, 425), (4, 0.4, 5, 20), multiplier=2.5, response_tier="priority"),
-    event_sample(5, "codex · dev-team@example.com", "codex", "codex-auto-review", "CodexWebsocketsExecutor", "low", "auto", 2516, 1431, 10, (1030, 49920, 0, 75), (0.2, 0.02, 0.25, 1.2), response_model="gpt-5.6-luna", response_tier="default"),
-    event_sample(1, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "medium", "auto", 2417, 1103, 0, (1194, 95616, 0, 73), (5, 0.5, 5, 30)),
-    event_sample(1, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexWebsocketsExecutor", "high", "auto", 5306, 2121, 21, (798, 169984, 0, 201), (4, 0.4, 5, 20)),
-    event_sample(2, "claude · platform@example.com", "claude", "deepseek-v4-pro", "ClaudeExecutor", "high", "auto", 10061, 637, 0, (38049, 0, 0, 474), (0.435, 0.003625, 0.435, 0.87), billing_model="claude/deepseek-v4-pro", response_model="deepseek-v4-pro"),
+    event_sample(0, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexExecutor", "high", "priority", 11513, 8209, 266, (712, 91648, 4096, 425), (4, 0.4, 5, 20), multiplier=2.5, response_tier="priority", auth_index="auth-demo-codex-plus"),
+    event_sample(5, "codex · dev-team@example.com", "codex", "codex-auto-review", "CodexWebsocketsExecutor", "low", "auto", 2516, 1431, 10, (1030, 49920, 0, 75), (0.2, 0.02, 0.25, 1.2), response_model="gpt-5.6-luna", response_tier="default", auth_index="auth-demo-codex-plus"),
+    event_sample(1, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "medium", "auto", 2417, 1103, 0, (1194, 95616, 0, 73), (5, 0.5, 5, 30), auth_index="auth-demo-codex-plus"),
+    event_sample(1, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexWebsocketsExecutor", "high", "auto", 5306, 2121, 21, (798, 169984, 0, 201), (4, 0.4, 5, 20), auth_index="auth-demo-codex-plus"),
+    event_sample(2, "claude · platform@example.com", "claude", "deepseek-v4-pro", "ClaudeExecutor", "high", "auto", 10061, 637, 0, (38049, 0, 0, 474), (0.435, 0.003625, 0.435, 0.87), billing_model="claude/deepseek-v4-pro", response_model="deepseek-v4-pro", auth_index="auth-demo-claude"),
     event_sample(7, "codex · sk-proxy…7f3a", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "high", "auto", 7288, 4130, 188, (8502, 45440, 0, 309), (5, 0.5, 5, 30)),
-    event_sample(6, "codex · dev-team@example.com", "codex", "gpt-5.6-terra", "CodexWebsocketsExecutor", "medium", "auto", 10120, 3379, 81, (1300, 69376, 0, 477), (2, 0.2, 2.5, 12)),
-    event_sample(4, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexWebsocketsExecutor", "high", "auto", 2609, 1881, 6, (1368, 237824, 0, 46), (4, 0.4, 5, 20)),
-    event_sample(5, "codex · dev-team@example.com", "codex", "gpt-5.6-luna", "CodexWebsocketsExecutor", "low", "auto", 5002, 2464, 61, (1261, 149248, 0, 147), (0.2, 0.02, 0.25, 1.2)),
+    event_sample(6, "codex · dev-team@example.com", "codex", "gpt-5.6-terra", "CodexWebsocketsExecutor", "medium", "auto", 10120, 3379, 81, (1300, 69376, 0, 477), (2, 0.2, 2.5, 12), auth_index="auth-demo-codex-plus"),
+    event_sample(4, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexWebsocketsExecutor", "high", "auto", 2609, 1881, 6, (1368, 237824, 0, 46), (4, 0.4, 5, 20), auth_index="auth-demo-codex-plus"),
+    event_sample(5, "codex · dev-team@example.com", "codex", "gpt-5.6-luna", "CodexWebsocketsExecutor", "low", "auto", 5002, 2464, 61, (1261, 149248, 0, 147), (0.2, 0.02, 0.25, 1.2), auth_index="auth-demo-codex-plus"),
     event_sample(7, "codex · sk-proxy…7f3a", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "high", "auto", 7634, 4412, 94, (24196, 19840, 0, 275), (5, 0.5, 5, 30)),
-    event_sample(6, "codex · dev-team@example.com", "codex", "gpt-image-2", "CodexExecutor", "", "auto", 43679, 43476, 0, (1658, 0, 0, 915), (5, 1.25, 5, 30)),
-    event_sample(3, "claude · platform@example.com", "claude", "deepseek-v4-pro", "ClaudeExecutor", "high", "auto", 16431, 909, 0, (66079, 32768, 0, 535), (0.435, 0.003625, 0.435, 0.87), billing_model="claude/deepseek-v4-pro"),
-    event_sample(0, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexExecutor", "high", "auto", 19542, 17836, 681, (835, 282752, 0, 802), (8, 0.8, 10, 30), long_context=True),
-    event_sample(6, "codex · dev-team@example.com", "codex", "gpt-5.6-luna", "CodexWebsocketsExecutor", "low", "auto", 5074, 3149, 49, (28615, 31488, 0, 124), (0.2, 0.02, 0.25, 1.2)),
+    event_sample(6, "codex · dev-team@example.com", "codex", "gpt-image-2", "CodexExecutor", "", "auto", 43679, 43476, 0, (1658, 0, 0, 915), (5, 1.25, 5, 30), auth_index="auth-demo-codex-plus"),
+    event_sample(3, "claude · platform@example.com", "claude", "deepseek-v4-pro", "ClaudeExecutor", "high", "auto", 16431, 909, 0, (66079, 32768, 0, 535), (0.435, 0.003625, 0.435, 0.87), billing_model="claude/deepseek-v4-pro", auth_index="auth-demo-claude"),
+    event_sample(0, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexExecutor", "high", "auto", 19542, 17836, 681, (835, 282752, 0, 802), (8, 0.8, 10, 30), long_context=True, auth_index="auth-demo-codex-plus"),
+    event_sample(6, "codex · dev-team@example.com", "codex", "gpt-5.6-luna", "CodexWebsocketsExecutor", "low", "auto", 5074, 3149, 49, (28615, 31488, 0, 124), (0.2, 0.02, 0.25, 1.2), auth_index="auth-demo-codex-plus"),
 ]
 
 FAILURE_EVENT_SAMPLES = [
-    event_sample(1, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "high", "auto", 4338, 237, 0, (0, 0, 0, 0), (5, 0.5, 5, 30), failed=True),
+    event_sample(1, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "high", "auto", 4338, 237, 0, (0, 0, 0, 0), (5, 0.5, 5, 30), failed=True, auth_index="auth-demo-codex-plus"),
 ]
 
 UNASSIGNED_EVENT_SAMPLES = [
-    event_sample(None, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "medium", "auto", 3120, 1288, 12, (2048, 31744, 0, 96), (5, 0.5, 5, 30)),
-    event_sample(None, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "medium", "auto", 1810, 0, 0, (0, 0, 0, 0), (5, 0.5, 5, 30), failed=True),
+    event_sample(None, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "medium", "auto", 3120, 1288, 12, (2048, 31744, 0, 96), (5, 0.5, 5, 30), auth_index="auth-demo-codex-plus"),
+    event_sample(None, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "medium", "auto", 1810, 0, 0, (0, 0, 0, 0), (5, 0.5, 5, 30), failed=True, auth_index="auth-demo-codex-plus"),
 ]
 
 EVENT_SAMPLES = SUCCESS_EVENT_SAMPLES * 2 + FAILURE_EVENT_SAMPLES + UNASSIGNED_EVENT_SAMPLES
@@ -1395,7 +1401,7 @@ def payload_for(path, query):
         return {"entries": entries[:limit], "level_counts": counts,
                 "next_before_id": entries[limit - 1]["id"] if len(entries) > limit else 0}
     if path == f"{API_BASE}/auth-files":
-        return {"files": auth_file_views(AUTH_FILES)}
+        return {"files": auth_file_views(AUTH_FILES, query)}
     if path == f"{API_BASE}/auth-files/quota":
         return auth_file_quota(query)
     if path == f"{API_BASE}/prices/reference":
@@ -1544,7 +1550,7 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path.endswith("/errors"):
                 self.send_json(200, error_view(parse_qs(parsed.query), LIVE_KEYS[index]["scope"]))
             elif parsed.path.endswith("/auth-files"):
-                self.send_json(200, {"files": auth_file_views(account_auth_files(index))})
+                self.send_json(200, {"files": auth_file_views(account_auth_files(index), parse_qs(parsed.query), LIVE_KEYS[index]["scope"])})
             elif parsed.path.endswith("/auth-files/quota"):
                 query = parse_qs(parsed.query)
                 allowed = {

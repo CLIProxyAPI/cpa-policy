@@ -16,7 +16,7 @@ func TestCredentialQuotaReadsHeaderValuesAndValueLists(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	view, err := d.CredentialUsage([]string{"dummy-auth"}, "dummy", eventStart)
+	view, err := d.CredentialUsage([]string{"dummy-auth"}, "dummy", eventStart, eventStart.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}

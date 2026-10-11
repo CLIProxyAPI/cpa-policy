@@ -9,7 +9,7 @@ import (
 	"cpa-key-billing/internal/billing"
 )
 
-func (d *DB) CredentialUsage(authIndexes []string, scope string, since time.Time) (map[string]billing.CredentialUsage, error) {
+func (d *DB) CredentialUsage(authIndexes []string, scope string, from, to time.Time) (map[string]billing.CredentialUsage, error) {
 	if len(authIndexes) == 0 {
 		return map[string]billing.CredentialUsage{}, nil
 	}
@@ -18,8 +18,8 @@ func (d *DB) CredentialUsage(authIndexes []string, scope string, since time.Time
 		args[i] = authIndex
 	}
 	filter := "auth_index IN (" + strings.TrimSuffix(strings.Repeat("?,", len(args)), ",") + ")"
-	statsFilter := filter + " AND at >= ?"
-	statsArgs := append(append([]any(nil), args...), nanos(since))
+	statsFilter := filter + " AND at >= ? AND at < ?"
+	statsArgs := append(append([]any(nil), args...), nanos(from), nanos(to))
 	if scope != "" {
 		statsFilter += " AND scope = ?"
 		statsArgs = append(statsArgs, scope)

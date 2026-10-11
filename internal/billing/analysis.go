@@ -64,9 +64,9 @@ type AnalysisView struct {
 
 func (s *Store) Analysis(query RequestEventQuery) (AnalysisView, error) {
 	now := s.Now()
-	from, to := effectiveAnalysisRange(query, now)
-	if !from.Before(to) {
-		return AnalysisView{}, invalidf("The analysis range is outside the retained request history")
+	from, to, err := usageTimeRange(query.From, query.To, now)
+	if err != nil {
+		return AnalysisView{}, err
 	}
 	query.From, query.To = from, to
 	view, err := withRepository(s, func(repo Repository) (AnalysisView, error) {
@@ -82,20 +82,4 @@ func (s *Store) Analysis(query RequestEventQuery) (AnalysisView, error) {
 		view.UsageDistribution.Sources = []AnalysisComposition{}
 	}
 	return view, err
-}
-
-func effectiveAnalysisRange(query RequestEventQuery, now time.Time) (time.Time, time.Time) {
-	to := query.To
-	if to.IsZero() || to.After(now) {
-		to = now
-	}
-	from := query.From
-	if from.IsZero() {
-		from = to.Add(-30 * 24 * time.Hour)
-	}
-	cutoff := now.Add(-RequestEventRetention)
-	if from.Before(cutoff) {
-		from = cutoff
-	}
-	return from, to
 }

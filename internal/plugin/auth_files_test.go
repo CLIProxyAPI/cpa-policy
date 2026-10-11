@@ -30,7 +30,7 @@ func TestAuthFilesExposeOnlyDisplayFieldsInCategoryOrder(t *testing.T) {
 			{"auth_index":"cl-1","name":"claude.json","type":"claude"}
 		]}`), nil
 	})
-	response := app.authFiles(viewAccess{})
+	response := app.authFiles(ManagementRequest{}, viewAccess{})
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
 	}
@@ -86,7 +86,7 @@ func TestAccountAuthFilesRequireTrackedAPIKey(t *testing.T) {
 	if !ok {
 		t.Fatal("valid bearer was rejected")
 	}
-	if response := app.authFiles(access); response.StatusCode != http.StatusUnauthorized {
+	if response := app.authFiles(ManagementRequest{}, access); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("untracked status = %d, want %d", response.StatusCode, http.StatusUnauthorized)
 	}
 	request.Query = url.Values{"auth_index": {"codex-1"}}
@@ -100,11 +100,88 @@ func TestAccountAuthFilesRequireTrackedAPIKey(t *testing.T) {
 		t.Fatal(errSync)
 	}
 	access, _ = app.apiKeyViewAccess(request)
-	if response := app.authFiles(access); response.StatusCode != http.StatusOK {
+	if response := app.authFiles(ManagementRequest{}, access); response.StatusCode != http.StatusOK {
 		t.Fatalf("tracked status = %d, body = %s", response.StatusCode, response.Body)
 	}
 	if hostCalls != 1 {
 		t.Fatalf("tracked account made %d host calls, want 1", hostCalls)
+	}
+}
+
+func TestAuthFilesStatisticsFollowTimeRangeAndAccountScope(t *testing.T) {
+	app := newAppWithPrice(t, true)
+	from := app.store.Now().Add(-time.Hour).Truncate(time.Second)
+	to := from.Add(2 * time.Minute)
+	for _, sample := range []struct {
+		at   time.Time
+		key  string
+		zero bool
+	}{
+		{from.Add(-45 * 24 * time.Hour), accountTestKeyA, false},
+		{from.Add(-time.Nanosecond), accountTestKeyA, false},
+		{from, accountTestKeyA, false},
+		{from.Add(time.Minute), accountTestKeyA, true},
+		{from.Add(time.Minute), accountTestKeyB, false},
+		{to, accountTestKeyA, false},
+	} {
+		record := UsageRecord{Provider: "codex", AuthType: "oauth", AuthIndex: "dummy-auth",
+			APIKey: sample.key, Model: "gpt-5.5", RequestedAt: sample.at,
+			Detail: UsageDetail{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 50, TotalTokens: 120}}
+		if sample.zero {
+			record.Failed = true
+			record.Detail = UsageDetail{}
+		}
+		if sample.at.Equal(to) {
+			record.ResponseHeaders = http.Header{
+				"X-Codex-Plan-Type": {"plus"}, "X-Codex-Primary-Used-Percent": {"90"},
+				"X-Codex-Primary-Window-Minutes": {"300"}, "X-Codex-Primary-Reset-After-Seconds": {"1800"},
+			}
+		}
+		publishUsageRecord(t, app, record)
+	}
+	app.SetHostCaller(func(method string, _ any) (json.RawMessage, error) {
+		if method != hostAuthList {
+			t.Fatalf("unexpected host method: %s", method)
+		}
+		return json.RawMessage(`{"files":[{"auth_index":"dummy-auth","name":"dummy.json","type":"codex"}]}`), nil
+	})
+	query := url.Values{"from": {from.Format(time.RFC3339Nano)}, "to": {to.Format(time.RFC3339Nano)}}
+	for _, tc := range []struct {
+		name, key string
+		query     url.Values
+		want      billing.CredentialUsageStats
+	}{
+		{"selected", "", query, billing.CredentialUsageStats{Requests: 3, Failed: 1, InputTokens: 200, CacheReadTokens: 100, OutputTokens: 40}},
+		{"account", accountTestKeyA, query, billing.CredentialUsageStats{Requests: 2, Failed: 1, InputTokens: 100, CacheReadTokens: 50, OutputTokens: 20}},
+		{"default", "", nil, billing.CredentialUsageStats{Requests: 5, Failed: 1, InputTokens: 400, CacheReadTokens: 200, OutputTokens: 80}},
+		{"extended", "", url.Values{"from": {from.Add(-60 * 24 * time.Hour).Format(time.RFC3339Nano)}},
+			billing.CredentialUsageStats{Requests: 6, Failed: 1, InputTokens: 500, CacheReadTokens: 250, OutputTokens: 100}},
+		{"empty", "", url.Values{"from": {to.Add(time.Minute).Format(time.RFC3339Nano)}}, billing.CredentialUsageStats{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var response ManagementResponse
+			if tc.key != "" {
+				response = callAccount(t, app, routeAuthFiles, tc.key, tc.query)
+			} else {
+				response = callManagement(t, app, http.MethodGet, routeAuthFiles, tc.query, nil)
+			}
+			var view authFileListResponse
+			if err := json.Unmarshal(response.Body, &view); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusOK || len(view.Files) != 1 || view.Files[0].Usage != tc.want {
+				t.Fatalf("response=%s, want=%+v", response.Body, tc.want)
+			}
+			quota := view.Files[0].Quota
+			if quota == nil || quota.Plan != "Plus" || len(quota.Quota) != 1 || *quota.Quota[0].RemainingPercent != 10 {
+				t.Fatalf("latest quota=%+v", quota)
+			}
+		})
+	}
+	for _, invalid := range []url.Values{
+		{"from": {"bad"}}, {"to": {"bad"}}, {"from": query["to"], "to": query["from"]},
+	} {
+		callOK(t, app, http.MethodGet, routeAuthFiles, invalid, nil, http.StatusBadRequest, nil)
 	}
 }
 
@@ -151,7 +228,7 @@ func TestAccountAuthFilesFollowCredentialRouting(t *testing.T) {
 				}
 			})
 			access := viewAccess{APIKey: true, Scope: scope, Tracked: true}
-			response := app.authFiles(access)
+			response := app.authFiles(ManagementRequest{}, access)
 			if response.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
 			}
@@ -230,7 +307,7 @@ func TestRuntimeOnlyAuthFileDisablesQuotaWithoutLeakingDetails(t *testing.T) {
 		}
 		return json.RawMessage(`{"files":[{"auth_index":"runtime-1","name":"runtime","type":"codex","runtime_only":true,"path":"/secret/runtime"}]}`), nil
 	})
-	response := app.authFiles(viewAccess{})
+	response := app.authFiles(ManagementRequest{}, viewAccess{})
 	var payload authFileListResponse
 	if errDecode := json.Unmarshal(response.Body, &payload); errDecode != nil {
 		t.Fatal(errDecode)
@@ -790,7 +867,7 @@ func TestAuthQuotaReset(t *testing.T) {
 			}
 			if tc.name == "masked name" {
 				var files authFileListResponse
-				if err := json.Unmarshal(app.authFiles(access).Body, &files); err != nil {
+				if err := json.Unmarshal(app.authFiles(ManagementRequest{}, access).Body, &files); err != nil {
 					t.Fatal(err)
 				}
 				if files.Files[0].Name == file.Name {
