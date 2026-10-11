@@ -57,8 +57,6 @@ func migrateRequestErrorReason(tx *sql.Tx) error {
 	return nil
 }
 
-// Schema 15 shipped this column before the plugin stopped recording response
-// headers. Keep adding it so upgraded databases still match a fresh schema.
 func migrateResponseHeaders(tx *sql.Tx) error {
 	if _, err := tx.Exec(
 		"ALTER TABLE request_events ADD COLUMN response_headers_json TEXT NOT NULL DEFAULT '{}'"); err != nil {

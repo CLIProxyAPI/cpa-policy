@@ -99,13 +99,13 @@ function renderAccountAccess(access) {
       { class: "account-access-summary" },
       el(
         "div",
-        { class: "auth-file-card" },
+        { class: "inset-card" },
         el("div", { class: "account-access-scope-label", text: m("ui.model_access") }),
         settingsChipList(modelItems)
       ),
       el(
         "div",
-        { class: "auth-file-card" },
+        { class: "inset-card" },
         el("div", { class: "account-access-scope-label", text: m("ui.credential_access") }),
         settingsChipList(credentialItems)
       )
@@ -159,7 +159,7 @@ function renderAccountModel(model) {
   return el(
     "div",
     { class: "account-model-card" },
-    el("b", { class: "mono account-model-name", title: model }, model),
+    el("b", { class: "mono account-model-name", "data-tip": model, "data-tip-overflow": "" }, model),
     price
       ? el("div", { class: "account-model-price-list" }, priceRows.map(priceRow))
       : el("span", { class: "muted small", text: m("ui.no_price_configured_currently_unavailable") })

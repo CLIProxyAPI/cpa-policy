@@ -445,10 +445,31 @@ AUTH_FILES.sort(
 
 
 def auth_file_views(files):
-    # Mirrors authQuotaAvailability in internal/plugin/auth_files.go.
-    return [{**item, "quota_supported": False, "quota_unavailable_reason": "Auth file is disabled",
-             "quota_unavailable_message": {"message_key": "backend.auth_file_is_disabled"}}
-            if item["disabled"] else item for item in files]
+    views = []
+    for index, item in enumerate(files):
+        view = {**item, "usage": {
+            "requests": 1200 + index * 213, "failed": 35 + index * 3,
+            "input_tokens": 82560000 + index * 1000000, "cache_read_tokens": 74200000,
+            "output_tokens": 756000,
+        }}
+        if item["category"] in ("codex", "claude"):
+            quota = auth_file_quota({"auth_index": [item["auth_index"]]})
+            observed_at = iso(NOW - timedelta(minutes=6 + index))
+            view["quota"] = {
+                "fetched_at": observed_at,
+                "plan": quota.get("plan", ""), "plan_observed_at": observed_at,
+                "quota": [{**row, "observed_at": observed_at} for row in quota["quota"] if "reset_at" in row],
+            }
+            if item["category"] == "codex":
+                view["quota"].update(
+                    credit_balance=quota.get("credit_balance", ""), credit_balance_observed_at=observed_at,
+                    credits_unlimited=quota.get("credits_unlimited", False), credits_unlimited_observed_at=observed_at,
+                )
+        if item["disabled"]:
+            view.update(quota_supported=False, quota_unavailable_reason="Auth file is disabled",
+                        quota_unavailable_message={"message_key": "backend.auth_file_is_disabled"})
+        views.append(view)
+    return views
 
 
 def quota_row(label, remaining_percent, reset_seconds, **extra):
@@ -472,14 +493,16 @@ AUTH_FILE_QUOTAS = {
         "quota": [
             quota_row("周限额", 62, 432000),
             quota_row(
-                "GPT-5.3-Codex-Spark 5 小时限额",
+                "5 小时限额",
                 100,
                 18000,
+                label_prefix="GPT-5.3-Codex-Spark ",
             ),
             quota_row(
-                "GPT-5.3-Codex-Spark 周限额",
+                "周限额",
                 100,
                 604800,
+                label_prefix="GPT-5.3-Codex-Spark ",
             ),
         ],
     },
@@ -567,7 +590,7 @@ def auth_file_quota(query):
     for row in result["quota"]:
         key = labels.get(row.get("label", ""))
         if key:
-            row["label"] = english[key]
+            row["label"] = row.get("label_prefix", "") + english[key]
             row["label_message"] = {"message_key": key}
     return result
 

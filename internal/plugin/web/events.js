@@ -124,7 +124,7 @@ function disambiguateSourceFilterOptions(options) {
     let length = Math.min(6, item.digest.length);
     while (length < item.digest.length && group.some((other) => other !== item && other.digest.startsWith(item.digest.slice(0, length))))
       length++;
-    return { ...item.option, label: item.label + " · #" + item.digest.slice(0, length).toUpperCase() };
+    return { ...item.option, label: item.label + DISPLAY_SEPARATOR + "#" + item.digest.slice(0, length).toUpperCase() };
   });
 }
 
@@ -207,7 +207,7 @@ function failureTag(entry) {
 }
 
 function renderRequestEvents(account = false) {
-  hideCostTooltip();
+  closeHoverTooltip();
   const list = pagedList("events", account);
   const note = $(account ? "account-request-event-note" : "request-event-note");
   if (list.renderEmpty()) {
@@ -275,7 +275,7 @@ function renderRequestEvents(account = false) {
         el("div", { class: "request-event-cell-line mono" }, entry.executor_type || m("ui.unknown_executor")),
         el(
           "div",
-          { class: "request-event-source muted", title: displayLabel(entry.source) || null },
+          { class: "request-event-source muted", "data-tip": displayLabel(entry.source) || null, "data-tip-overflow": "" },
           entry.source ? maskedLabelText(entry.source) : m("ui.unknown_source")
         )
       ),
@@ -294,7 +294,7 @@ function renderRequestEvents(account = false) {
           "div",
           {
             class: "muted small",
-            title: hasTTFT ? m("ui.time_to_first_tokenvaluetotal_latency", { v0: DISPLAY_SEPARATOR }) : m("ui.total_latency")
+            "data-tip": hasTTFT ? m("ui.time_to_first_tokenvaluetotal_latency", { v0: DISPLAY_SEPARATOR }) : m("ui.total_latency")
           },
           hasTTFT ? latency(entry.ttft_ms) + DISPLAY_SEPARATOR + latency(entry.latency_ms) : latency(entry.latency_ms)
         )
@@ -328,10 +328,7 @@ function renderRequestEvents(account = false) {
                   class: "cost-value",
                   tabindex: "0",
                   "aria-label": m("ui.view_cost_breakdown"),
-                  onmouseenter: (event) => showCostTooltip(event.currentTarget, cost, hasCacheWrite),
-                  onmouseleave: hideCostTooltip,
-                  onfocus: (event) => showCostTooltip(event.currentTarget, cost, hasCacheWrite),
-                  onblur: hideCostTooltip
+                  ...hoverTooltipProps(() => renderCostTooltip(cost, hasCacheWrite))
                 },
                 usd(cost.total_usd)
               )
@@ -366,15 +363,14 @@ function costTierText(cost) {
   return cost.long_context ? m("ui.long_context_value", { v0: threshold }) : m("ui.standard_context_value", { v0: threshold });
 }
 
-function showCostTooltip(anchor, cost, hasCacheWrite) {
-  const tooltip = $("cost-tooltip");
+function renderCostTooltip(cost, hasCacheWrite) {
   const rows = [
     [m("ui.uncached_input"), cost.uncached_input_tokens, cost.applied_input_per_1m, cost.uncached_input_usd],
     [m("ui.cache_read"), cost.cache_read_tokens, cost.applied_cache_read_per_1m, cost.cache_read_usd],
     ...(hasCacheWrite ? [[m("ui.cache_write"), cost.cache_write_tokens, cost.applied_cache_write_per_1m, cost.cache_write_usd]] : []),
     [m("ui.output"), cost.billed_output_tokens, cost.applied_output_per_1m, cost.output_usd]
   ];
-  tooltip.replaceChildren(
+  return [
     el("div", { class: "cost-tooltip-title", text: m("ui.cost_breakdown") }),
     ...(cost.tiered ? [el("div", { class: "cost-tooltip-summary" }, el("span", {}, m("ui.tier")), el("b", {}, costTierText(cost)))] : []),
     ...(cost.multiplier === 2.5
@@ -396,36 +392,12 @@ function showCostTooltip(anchor, cost, hasCacheWrite) {
       el("span", { class: "cost-tooltip-head num" }, m("ui.amount")),
       rows.flatMap(([name, tokenCount, price, amount]) => [
         el("span", {}, name),
-        el("span", { class: "num" }, exactTokens(tokenCount) + " × " + usd(price) + " / 1M"),
+        el("span", { class: "num" }, exactTokens(tokenCount) + " × " + usd(price) + DISPLAY_SLASH + "1M"),
         el("span", { class: "num" }, usd(amount))
       ])
     ),
     el("div", { class: "cost-tooltip-total" }, el("span", {}, m("ui.total_amount")), el("span", {}, usd(cost.total_usd)))
-  );
-  tooltip.classList.add("show");
-  tooltip.setAttribute("aria-hidden", "false");
-  positionCostTooltip(anchor);
-}
-
-function positionCostTooltip(anchor) {
-  const tooltip = $("cost-tooltip");
-  const anchorRect = anchor.getBoundingClientRect();
-  const gap = 8;
-  const margin = 8;
-  let left = anchorRect.right + gap;
-  let top = anchorRect.top;
-  const rect = tooltip.getBoundingClientRect();
-  if (left + rect.width > innerWidth - margin) left = anchorRect.left - rect.width - gap;
-  if (left < margin) left = Math.max(margin, innerWidth - rect.width - margin);
-  if (top + rect.height > innerHeight - margin) top = innerHeight - rect.height - margin;
-  tooltip.style.left = Math.round(left) + "px";
-  tooltip.style.top = Math.round(Math.max(margin, top)) + "px";
-}
-
-function hideCostTooltip() {
-  const tooltip = $("cost-tooltip");
-  tooltip.classList.remove("show");
-  tooltip.setAttribute("aria-hidden", "true");
+  ];
 }
 
 function populateErrorFilters(view, account) {
@@ -494,7 +466,11 @@ function errorEventField(label, value, mono = true) {
     el("span", { class: "error-event-field-label", text: label }),
     el(
       "span",
-      { class: "error-event-field-value" + (mono ? " mono" : ""), title: typeof value === "string" ? displayLabel(value) : null },
+      {
+        class: "error-event-field-value" + (mono ? " mono" : ""),
+        "data-tip": typeof value === "string" ? displayLabel(value) : null,
+        "data-tip-overflow": ""
+      },
       displayText(value)
     )
   );

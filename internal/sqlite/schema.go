@@ -12,6 +12,7 @@ var indexes = map[string][]index{
 	"request_events": {
 		{"at", "at, id, failed"},
 		{"scope_at", "scope, at, id, failed"},
+		{"auth_at", "auth_index, at"},
 		{"model_at", eventModelSQL + ", at"},
 	},
 	"request_errors": {

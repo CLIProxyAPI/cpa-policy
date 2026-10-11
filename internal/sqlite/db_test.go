@@ -116,7 +116,7 @@ func TestOpenSynchronizesIndexes(t *testing.T) {
 	if _, err := d.db.Exec(`DROP INDEX request_events_at;
 		CREATE INDEX request_events_at ON request_events(at);
 		DROP INDEX request_events_scope_at;
-		CREATE INDEX request_events_auth_at ON request_events(auth_index, at);
+		CREATE INDEX request_events_obsolete ON request_events(auth_index);
 		CREATE INDEX operator_message ON plugin_logs(message);
 		CREATE UNIQUE INDEX operator_unique_message ON plugin_logs(message)`); err != nil {
 		t.Fatal(err)

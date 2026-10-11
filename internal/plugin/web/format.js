@@ -18,11 +18,11 @@ function loadedCountText(loaded, total, complete) {
 }
 
 function int(value) { return Number(value || 0).toLocaleString(locale()); }
-function tokens(value) {
+function tokens(value, thousandsDigits = 1) {
   const n = Number(value || 0);
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  if (n >= 1e3) return (n / 1e3).toFixed(thousandsDigits) + "K";
   return String(n);
 }
 function quotaTokens(n) {
@@ -138,7 +138,7 @@ function renderAPIKeyIdentity(view, options = {}) {
   const line = (text, className, children = []) => el("span", { class: "api-key-identity-line" + className }, maskedText(text), children);
   return el(
     "span",
-    { class: "api-key-identity" + (options.stacked ? " api-key-identity-stacked" : ""), title: identity.text },
+    { class: "api-key-identity" + (options.stacked ? " api-key-identity-stacked" : ""), "data-tip": identity.text },
     line(identity.primary, "", identity.secondary ? [] : trailing),
     identity.secondary ? line(identity.secondary, " api-key-identity-secondary", trailing) : null
   );

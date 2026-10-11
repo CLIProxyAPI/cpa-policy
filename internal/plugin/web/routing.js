@@ -19,7 +19,7 @@ function editKeyRoutes(view) {
 function routeBindingChoice(selection, id, label, rerender) {
   return el(
     "label",
-    { class: "routing-option", "data-routing-binding": id, title: displayLabel(label) },
+    { class: "routing-option", "data-routing-binding": id },
     checkboxControl({
       input: el("input", {
         type: "checkbox",
@@ -157,7 +157,7 @@ function routingSection(selection, kind, title, options, rerender) {
 function compactEnabledToggle(checked, onChange, title) {
   return el(
     "label",
-    { class: "toggle-filter compact-toggle", title },
+    { class: "toggle-filter compact-toggle", "data-tip": title },
     switchControl({
       input: el("input", {
         type: "checkbox",
@@ -329,7 +329,7 @@ function routeChoiceRow(selection, item, rerender) {
       "data-state": state,
       "data-routing-choice": key,
       "data-routing-focus": key,
-      title,
+      "data-tip": title,
       "aria-label": title,
       onclick: () => {
         setRouteChoice(selection, kind, value, next);
@@ -416,7 +416,7 @@ function renderRouteKeyList(keys, routeID) {
         {},
         checkboxControl({ input: el("input", { type: "checkbox", value: key.scope, checked }) }),
         renderAPIKeyIdentity(key),
-        key.deleted_at ? el("span", { class: "tag plain", text: m("ui.deleted"), title: m("ui.uncheck_to_remove_the_binding") }) : null
+        key.deleted_at ? el("span", { class: "tag plain", text: m("ui.deleted"), "data-tip": m("ui.uncheck_to_remove_the_binding") }) : null
       );
     })
   );

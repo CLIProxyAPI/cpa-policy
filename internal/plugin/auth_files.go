@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"cpa-key-billing/internal/billing"
 	"cpa-key-billing/internal/messages"
 )
 
@@ -49,17 +50,19 @@ type hostAuthFile struct {
 }
 
 type authFileView struct {
-	AuthIndex          string           `json:"auth_index"`
-	Name               string           `json:"name"`
-	Category           string           `json:"category"`
-	Email              string           `json:"email,omitempty"`
-	Disabled           bool             `json:"disabled"`
-	Unavailable        bool             `json:"unavailable"`
-	Priority           int              `json:"priority"`
-	QuotaSupported     bool             `json:"quota_supported"`
-	QuotaReason        string           `json:"quota_unavailable_reason,omitempty"`
-	QuotaReasonMessage messages.Message `json:"quota_unavailable_message,omitzero"`
-	CacheRevision      string           `json:"cache_revision,omitempty"`
+	AuthIndex          string                       `json:"auth_index"`
+	Name               string                       `json:"name"`
+	Category           string                       `json:"category"`
+	Email              string                       `json:"email,omitempty"`
+	Disabled           bool                         `json:"disabled"`
+	Unavailable        bool                         `json:"unavailable"`
+	Priority           int                          `json:"priority"`
+	QuotaSupported     bool                         `json:"quota_supported"`
+	QuotaReason        string                       `json:"quota_unavailable_reason,omitempty"`
+	QuotaReasonMessage messages.Message             `json:"quota_unavailable_message,omitzero"`
+	CacheRevision      string                       `json:"cache_revision,omitempty"`
+	Usage              billing.CredentialUsageStats `json:"usage"`
+	Quota              *authQuotaResponse           `json:"quota,omitempty"`
 }
 
 type authFileListResponse struct {
@@ -81,10 +84,14 @@ type quotaRow struct {
 	Limit            *float64         `json:"limit,omitempty"`
 	Currency         string           `json:"currency,omitempty"`
 	ResetAt          string           `json:"reset_at,omitempty"`
+	ObservedAt       time.Time        `json:"observed_at,omitzero"`
 	windowSeconds    int64
 }
 
 type authQuotaResponse struct {
+	PlanObservedAt                      time.Time           `json:"plan_observed_at,omitzero"`
+	CreditBalanceObservedAt             time.Time           `json:"credit_balance_observed_at,omitzero"`
+	CreditsUnlimitedObservedAt          time.Time           `json:"credits_unlimited_observed_at,omitzero"`
 	AuthRevision                        string              `json:"auth_revision,omitempty"`
 	FetchedAt                           time.Time           `json:"fetched_at"`
 	Plan                                string              `json:"plan,omitempty"`
@@ -243,6 +250,23 @@ func (a *App) listAuthFiles(access viewAccess) ([]authFileView, error) {
 			QuotaSupported: quotaSupported, QuotaReason: quotaReason, CacheRevision: authFileRevision(file),
 			QuotaReasonMessage: messages.Literal(quotaReason),
 		})
+	}
+	indexes := make([]string, len(views))
+	for i := range views {
+		indexes[i] = views[i].AuthIndex
+	}
+	scope := ""
+	if access.APIKey {
+		scope = access.Scope
+	}
+	usage, errUsage := a.store.CredentialUsage(indexes, scope)
+	if errUsage != nil {
+		return nil, errUsage
+	}
+	for i := range views {
+		value := usage[views[i].AuthIndex]
+		views[i].Usage = value.Stats
+		views[i].Quota = observedAuthQuota(views[i].Category, views[i].CacheRevision, value.Quota)
 	}
 	sort.SliceStable(views, func(i, j int) bool {
 		left, right := authCategoryOrder(views[i].Category), authCategoryOrder(views[j].Category)
@@ -644,61 +668,67 @@ func normalizeCodexResetCredits(object map[string]any) codexResetCreditsSummary 
 	return result
 }
 
+type quotaWindow struct {
+	Role             string
+	Seconds          int64
+	RemainingPercent *float64
+	ResetAt          string
+}
+
 func appendCodexRateLimit(result *authQuotaResponse, labelPrefix string, info map[string]any) {
-	if info == nil {
-		return
-	}
 	allowed, hasAllowed := boolValue(info, "allowed")
 	reached, hasReached := boolValue(info, "limit_reached", "limitReached")
-	windows := []struct {
-		key, role string
-		value     map[string]any
-		seconds   int64
-	}{
-		{key: "primary_window", role: "Primary"},
-		{key: "secondary_window", role: "Secondary"},
-	}
-	for index := range windows {
-		windows[index].value = objectMap(info, windows[index].key, camelKey(windows[index].key))
-		windows[index].seconds, _ = intValue(windows[index].value, "limit_window_seconds", "limitWindowSeconds")
-	}
-	sort.SliceStable(windows, func(i, j int) bool {
-		return codexWindowOrder(windows[i].seconds, windows[i].role) < codexWindowOrder(windows[j].seconds, windows[j].role)
-	})
-	for _, window := range windows {
-		value := window.value
+	windows := []quotaWindow{}
+	for _, role := range []string{"Primary", "Secondary"} {
+		key := strings.ToLower(role) + "_window"
+		value := objectMap(info, key, camelKey(key))
 		if value == nil {
 			continue
 		}
-		seconds := window.seconds
+		seconds, _ := intValue(value, "limit_window_seconds", "limitWindowSeconds")
+		window := quotaWindow{Role: role, Seconds: seconds}
+		if used, ok := floatValue(value, "used_percent", "usedPercent"); ok {
+			window.RemainingPercent = remainingPercent(100 - used)
+		} else if hasReached && reached || hasAllowed && !allowed {
+			window.RemainingPercent = remainingPercent(0)
+		}
+		if reset, ok := intValue(value, "reset_at", "resetAt"); ok && reset > 0 {
+			window.ResetAt = time.Unix(reset, 0).UTC().Format(time.RFC3339)
+		} else if reset, ok := intValue(value, "reset_after_seconds", "resetAfterSeconds"); ok {
+			window.ResetAt = resetAtAfter(result.FetchedAt, reset)
+		}
+		windows = append(windows, window)
+	}
+	appendQuotaWindows(result, labelPrefix, windows)
+}
+
+func appendQuotaWindows(result *authQuotaResponse, labelPrefix string, windows []quotaWindow) {
+	sort.SliceStable(windows, func(i, j int) bool {
+		return windows[i].order() < windows[j].order()
+	})
+	for _, window := range windows {
 		label := "5-hour limit"
-		if window.role == "Secondary" {
+		if window.Role == "Secondary" {
 			label = "Weekly limit"
 		}
-		switch {
+		switch seconds := window.Seconds; {
 		case seconds == 5*60*60:
 			label = "5-hour limit"
 		case seconds == 7*24*60*60:
 			label = "Weekly limit"
 		case seconds >= 28*24*60*60 && seconds <= 31*24*60*60:
 			label = "Monthly limit"
+		case seconds > 0:
+			label = strconv.FormatInt(seconds/60, 10) + " min"
 		}
-		row := quotaRow{Label: labelPrefix + label, LabelMessage: messages.Literal(label), LabelPrefix: labelPrefix}
-		if used, ok := floatValue(value, "used_percent", "usedPercent"); ok {
-			row.RemainingPercent = remainingPercent(100 - used)
-		} else if hasReached && reached || hasAllowed && !allowed {
-			row.RemainingPercent = remainingPercent(0)
-		}
-		if resetAt, ok := intValue(value, "reset_at", "resetAt"); ok && resetAt > 0 {
-			row.ResetAt = time.Unix(resetAt, 0).UTC().Format(time.RFC3339)
-		} else if reset, ok := intValue(value, "reset_after_seconds", "resetAfterSeconds"); ok {
-			row.ResetAt = resetAtAfter(result.FetchedAt, reset)
-		}
-		result.Quota = append(result.Quota, row)
+		result.Quota = append(result.Quota, quotaRow{Label: labelPrefix + label,
+			LabelMessage: messages.Literal(label), LabelPrefix: labelPrefix,
+			RemainingPercent: window.RemainingPercent, ResetAt: window.ResetAt})
 	}
 }
 
-func codexWindowOrder(seconds int64, role string) int {
+func (window quotaWindow) order() int {
+	seconds, role := window.Seconds, window.Role
 	switch {
 	case seconds == 5*60*60:
 		return 0

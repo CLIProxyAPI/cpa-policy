@@ -44,7 +44,7 @@ function renderPlans() {
         const quotas = settingsChipList(
           QUOTA_DIMENSIONS.filter((metric) => window[metric.key] > 0).map((metric) => ({
             text: metric.planValue(window[metric.key]),
-            title: m("ui.metric_value", { v0: metric.label, v1: metric.exact(window[metric.key]) })
+            hint: m("ui.metric_value", { v0: metric.label, v1: metric.exact(window[metric.key]) })
           }))
         );
         if (window.cycle_anchor_at)
@@ -115,7 +115,7 @@ function renderQuotaWindows(view, account = false) {
       const reset = el("span", {
         class: "muted",
         text: quotaWindowResetLabel(window, account),
-        title: window.started ? m("ui.resets_at_value", { v0: when(window.end_at) }) : null
+        "data-tip": window.started ? m("ui.resets_at_value", { v0: when(window.end_at) }) : null
       });
       return el(
         "div",
@@ -131,11 +131,16 @@ function renderQuotaWindows(view, account = false) {
             el(
               "div",
               { class: "quota-heading" },
-              el(single ? "b" : "span", { class: single ? "" : "muted", text: label, title: single ? label : null }),
+              el(single ? "b" : "span", {
+                class: single ? "" : "muted",
+                text: label,
+                "data-tip": single ? label : null,
+                "data-tip-overflow": ""
+              }),
               el("span", {
                 class: "mono" + (balance.blocked ? " blocked" : ""),
-                text: metric.format(balance.remaining) + "/" + metric.format(balance.limit),
-                title: m("ui.valuevalueremaining_valuevalueused_value_value", {
+                text: metric.format(balance.remaining) + DISPLAY_SLASH + metric.format(balance.limit),
+                "data-tip": m("ui.valuevalueremaining_valuevalueused_value_value", {
                   v0: metric.label,
                   v1: DISPLAY_SEPARATOR,
                   v2: metric.exact(balance.remaining),
@@ -360,7 +365,8 @@ function dateTimeControl(input, getLimits) {
         );
         redraw();
         popover.showPopover();
-        if (matchMedia("(max-width: 640px)").matches) popover.style.cssText = ""; else positionAnchoredPopover(popover, input, true);
+        if (matchMedia("(max-width: 640px)").matches) popover.style.cssText = "";
+        else positionAnchoredPopover(popover, input, { align: "end" });
         calendar.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
       }
     },
@@ -437,7 +443,7 @@ function addPlanWindow(quotaWindow = {}) {
     placeholder: "yyyy/MM/dd HH:mm:ss",
     autocomplete: "off",
     spellcheck: false,
-    title: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    "data-tip": Intl.DateTimeFormat().resolvedOptions().timeZone,
     onchange: () => validatePlanAnchor(row, false),
     onblur: () => {
       prefillPlanAnchor(row);
@@ -500,7 +506,7 @@ function addPlanWindow(quotaWindow = {}) {
         type: "button",
         class: "icon-action window-delete",
         "aria-label": m("ui.delete_window"),
-        title: m("ui.delete_window"),
+        "data-tip": m("ui.delete_window"),
         onclick: () => {
           row.remove();
           syncPlanWindows();
@@ -554,7 +560,9 @@ function renderPlanKeyList(planID, data) {
           input: el("input", { type: "checkbox", value: key.scope, checked: key.plan_id === planID && !!planID, disabled: ownedByOther })
         }),
         renderAPIKeyIdentity(key),
-        key.deleted_at ? el("span", { class: "tag plain", text: m("ui.deleted"), title: m("ui.uncheck_to_remove_the_binding") }) : null,
+        key.deleted_at
+          ? el("span", { class: "tag plain", text: m("ui.deleted"), "data-tip": m("ui.uncheck_to_remove_the_binding") })
+          : null,
         owner ? el("span", { class: "muted small", text: m("ui.bound_to_value", { v0: owner.name || owner.id }) }) : null
       );
     })

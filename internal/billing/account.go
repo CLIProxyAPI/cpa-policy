@@ -1,6 +1,7 @@
 package billing
 
 import (
+	"net/http"
 	"strings"
 	"time"
 )
@@ -12,6 +13,7 @@ type UsageEvent struct {
 	Provider            string
 	ExecutorType        string
 	AuthType            string
+	QuotaHeaders        http.Header
 	Account             string
 	ReasoningEffort     string
 	ServiceTier         string
@@ -109,6 +111,7 @@ func (s *Store) recordUsage(event UsageEvent, failure *RequestError) {
 			PriceSource:         price.Source,
 			Cost:                cost,
 			ReasoningTokens:     event.Breakdown.Output.ReasoningTokens,
+			QuotaHeaders:        event.QuotaHeaders,
 		}
 		var changedKeys []string
 		if key := state.ensureKey(scope, event.KeyPreview); key != nil {

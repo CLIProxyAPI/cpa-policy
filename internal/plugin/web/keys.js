@@ -77,7 +77,7 @@ function renderKeys() {
         {
           name: "plan_id",
           disabled: deleted || saving || !plans,
-          title: !plans ? resources.admin.plans.error || m("ui.loading_subscription_plans") : null,
+          "data-tip": !plans ? resources.admin.plans.error || m("ui.loading_subscription_plans") : null,
           "aria-label": m("ui.subscription_plan_for_value", { v0: name }),
           onchange: (event) =>
             guard(async () => {
@@ -109,7 +109,7 @@ function renderKeys() {
         {
           "aria-label": m("ui.maximum_concurrent_requests_for_value", { v0: name }),
           disabled: deleted || saving,
-          title: m("ui.maximum_concurrent_requests_0_means_unlimited"),
+          "data-tip": m("ui.maximum_concurrent_requests_0_means_unlimited"),
           onchange: (event) =>
             guard(async () => {
               const value = event.target.value;
@@ -157,7 +157,7 @@ function renderKeys() {
                   class: "key-copy-button link",
                   type: "button",
                   disabled: deleted || !view.in_config,
-                  title: m("ui.copy_api_key"),
+                  "data-tip": m("ui.copy_api_key"),
                   "aria-label": m("ui.copy_api_key"),
                   onclick: (event) => guard(() => copyAPIKey(event.currentTarget, view))
                 },
@@ -178,7 +178,7 @@ function renderKeys() {
             ? el("span", {
                 class: "tag plain",
                 text: m("ui.deleted"),
-                title: m("ui.removed_from_cpa_configuration_on_value", { v0: new Date(view.deleted_at).toLocaleString(locale()) })
+                "data-tip": m("ui.removed_from_cpa_configuration_on_value", { v0: new Date(view.deleted_at).toLocaleString(locale()) })
               })
             : view.blocked
               ? el("span", { class: "tag bad", text: m("ui.quota_exhausted") })

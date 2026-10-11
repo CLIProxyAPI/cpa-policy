@@ -1,9 +1,16 @@
+const tooltipContents = new WeakMap();
+
 function el(tag, attrs, ...children) {
   const node = document.createElement(tag);
   for (const [name, value] of Object.entries(attrs || {})) {
     if (name === "class") node.className = value;
     else if (name === "text") setText(node, value);
-    else if (name.startsWith("on")) {
+    else if (name === "tooltip") {
+      if (value) {
+        tooltipContents.set(node, value);
+        node.dataset.tip = "";
+      }
+    } else if (name.startsWith("on")) {
       node.addEventListener(name.slice(2), value);
     } else if (value !== null && value !== undefined && value !== false) setTextAttribute(node, name, value);
   }
@@ -27,7 +34,20 @@ function renderCollection(target, items, { render, headers, attrs, empty = m("ui
       ? el(
           "div",
           { class: "table-scroll" },
-          el("table", {}, el("thead", {}, el("tr", {}, headers.map((h) => el("th", { class: h.num ? "num" : "" }, h.label ?? h)))), rows)
+          el(
+            "table",
+            attrs,
+            el(
+              "thead",
+              {},
+              el(
+                "tr",
+                {},
+                headers.map((h) => el("th", { scope: "col", class: [h.class, h.num ? "num" : ""].filter(Boolean).join(" ") }, h.label ?? h))
+              )
+            ),
+            rows
+          )
         )
       : rows;
   }
@@ -35,6 +55,7 @@ function renderCollection(target, items, { render, headers, attrs, empty = m("ui
   if (headers) content.scrollLeft = tableLeft;
   target.scrollTop = top;
   target.scrollLeft = left;
+  refreshHoverTooltip();
   return rows;
 }
 let noticeTimer = 0;
@@ -66,16 +87,16 @@ async function fail(err) {
 }
 async function guard(fn) { try { await fn(); } catch (err) { await fail(err); } }
 
-function openActionDialog(title, text, value, save) {
+function openActionDialog(title, content, value, save, confirm = m("ui.confirm")) {
   return new Promise((resolve) => {
     let accepted = false;
     $("action-dialog").addEventListener("close", () => resolve(accepted), { once: true });
     openEditor("action-dialog", null, () => {
       setText($("action-dialog-title"), title);
-      setText($("action-text"), text || "");
+      $("action-content").replaceChildren(content?.nodeType ? content : window.billingI18n.textNode(content));
       $("action-input").value = value || "";
       $("action-input").classList.toggle("hidden", value === undefined);
-      setText($("action-confirm"), m("ui.confirm"));
+      setText($("action-confirm"), confirm);
       $("action-confirm").onclick = () =>
         submitEditor("action-dialog", async () => {
           await save?.($("action-input").value);
@@ -94,6 +115,7 @@ function updateEditorControls(editor) {
 }
 
 function openEditor(id, kind, initialize) {
+  closeHoverTooltip();
   const dialog = $(id);
   const editor = {
     dialog,
@@ -184,7 +206,8 @@ function actionIcon(name, className = "") {
 function setActionIcon(button, name, label) {
   button.replaceChildren(actionIcon(name));
   setTextAttribute(button, "aria-label", label);
-  setTextAttribute(button, "title", label);
+  button.dataset.tip = "";
+  refreshHoverTooltip();
 }
 
 function setLabeledActionIcon(button, name, label) {
@@ -223,111 +246,161 @@ async function copyText(text) {
 }
 
 let hoverTooltipAnchor = null;
+let hoverTooltipPoint = null;
+let hoverTooltipSource = "keyboard";
 let hoverTooltipTimer = 0;
+// Popover focus changes fire focusin synchronously.
+let hoverTooltipTransitioning = false;
 
 function closeHoverTooltip() {
   clearTimeout(hoverTooltipTimer);
   hoverTooltipTimer = 0;
-  hoverTooltipAnchor?.removeAttribute("aria-describedby");
+  if (hoverTooltipAnchor) {
+    const describedBy = (hoverTooltipAnchor.getAttribute("aria-describedby") || "").split(/\s+/)
+      .filter((id) => id && id !== "hover-tooltip");
+    if (describedBy.length) hoverTooltipAnchor.setAttribute("aria-describedby", describedBy.join(" "));
+    else hoverTooltipAnchor.removeAttribute("aria-describedby");
+  }
   hoverTooltipAnchor = null;
   const tooltip = $("hover-tooltip");
-  if (tooltip.matches(":popover-open")) tooltip.hidePopover();
+  if (tooltip.matches(":popover-open")) {
+    hoverTooltipTransitioning = true;
+    try { tooltip.hidePopover(); } finally { hoverTooltipTransitioning = false; }
+  }
 }
 
 function scheduleHoverTooltipClose(next) {
   const tooltip = $("hover-tooltip");
   if (next && (tooltip.contains(next) || hoverTooltipAnchor?.contains(next))) return;
+  if (hoverTooltipSource === "touch") return;
   clearTimeout(hoverTooltipTimer);
-  if (next?.closest?.(".key-route-actions")) closeHoverTooltip(); else hoverTooltipTimer = setTimeout(closeHoverTooltip, 150);
+  if (next?.closest?.("button, input, select, textarea, a[href]")) closeHoverTooltip();
+  else hoverTooltipTimer = setTimeout(closeHoverTooltip, 150);
 }
 
-function hoverTooltipProps(content, enabled) {
-  return {
-    tabindex: enabled ? "0" : null,
-    onpointerenter: (event) => {
-      if (event.pointerType !== "touch" && enabled)
-        showHoverTooltip(event.currentTarget, content(), { x: event.clientX, y: event.clientY });
-    },
-    onpointerleave: (event) => scheduleHoverTooltipClose(event.relatedTarget),
-    onfocus: (event) => { if (enabled) showHoverTooltip(event.currentTarget, content()); },
-    onblur: (event) => scheduleHoverTooltipClose(event.relatedTarget),
-    onkeydown: (event) => {
-      if (event.key === "Escape") closeHoverTooltip();
-      else if (event.key === "ArrowDown" && enabled) {
-        event.preventDefault();
-        showHoverTooltip(event.currentTarget, content());
-        $("hover-tooltip").focus({ preventScroll: true });
-      }
-    }
-  };
+function hoverTooltipProps(content, enabled = true) { return { tabindex: enabled ? "0" : null, tooltip: enabled ? content : null }; }
+
+function refreshHoverTooltip() {
+  if (!hoverTooltipAnchor) return;
+  const anchor = hoverTooltipAnchor.isConnected
+    ? hoverTooltipAnchor
+    : hoverTooltipPoint && document.elementFromPoint(hoverTooltipPoint.x, hoverTooltipPoint.y)?.closest("[data-tip]");
+  if (anchor) showHoverTooltip(anchor, { point: hoverTooltipPoint, source: hoverTooltipSource }); else closeHoverTooltip();
 }
 
-function showHoverTooltip(anchor, content, pointer) {
-  clearTimeout(hoverTooltipTimer);
-  if (hoverTooltipAnchor === anchor && $("hover-tooltip").matches(":popover-open")) return;
+function showHoverTooltip(anchor, { point = null, source = "keyboard" } = {}) {
+  if (hoverTooltipTransitioning) return;
+  const render = tooltipContents.get(anchor);
+  const text = anchor.dataset.tip || anchor.getAttribute("aria-label");
+  const masked = anchor.closest(".mask-blur") || anchor.querySelector(".mask-blur");
+  const content = render ? render() : text ? [el("div", { class: "hover-tooltip-body" + (masked ? " mask-blur" : ""), text })] : null;
   closeHoverTooltip();
+  if (anchor.hasAttribute("data-tip-overflow") && anchor.scrollWidth <= anchor.clientWidth + 1) return;
+  if (!content?.length) return;
   const tooltip = $("hover-tooltip");
   hoverTooltipAnchor = anchor;
-  anchor.setAttribute("aria-describedby", tooltip.id);
+  hoverTooltipPoint = point;
+  hoverTooltipSource = source;
+  const describedBy = anchor.getAttribute("aria-describedby");
+  anchor.setAttribute("aria-describedby", [describedBy, tooltip.id].filter(Boolean).join(" "));
   tooltip.replaceChildren(...content);
   tooltip.style.maxHeight = "";
-  tooltip.showPopover();
+  hoverTooltipTransitioning = true;
+  try { tooltip.showPopover(); } finally { hoverTooltipTransitioning = false; }
   tooltip.scrollTop = 0;
-  const bounds = anchor.getBoundingClientRect();
-  const point = pointer || { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
-  const width = tooltip.offsetWidth;
-  const height = tooltip.offsetHeight;
-  const margin = 12, gap = 12;
-  const viewportWidth = document.documentElement.clientWidth;
-  let left = point.x + gap;
-  let top = point.y + gap;
-  if (left + width > viewportWidth - margin) left = point.x - gap - width;
-  if (top + height > innerHeight - margin) top = point.y - gap - height;
-  left = Math.max(margin, Math.min(left, viewportWidth - width - margin));
-  top = Math.max(margin, Math.min(top, innerHeight - height - margin));
-  const actions = anchor.closest(".key-route-cell")?.querySelector(".key-route-actions")?.getBoundingClientRect();
-  if (actions && left < actions.right && left + width > actions.left && top < actions.bottom && top + height > actions.top) {
-    // Keep the cursor as the anchor; flip above it when its own action
-    // links would otherwise be covered. Only the links need clearance.
-    const above = point.y - gap - margin;
-    if (above >= 60) {
-      tooltip.style.maxHeight = Math.min(320, above) + "px";
-      top = point.y - gap - tooltip.offsetHeight;
-    } else if (actions.right + gap + width <= viewportWidth - margin) { left = actions.right + gap; }
-  }
-  tooltip.style.left = left + "px";
-  tooltip.style.top = top + "px";
+  positionHoverTooltip(anchor);
 }
 
-$("hover-tooltip").addEventListener("pointerenter", () => clearTimeout(hoverTooltipTimer));
-$("hover-tooltip").addEventListener("focus", () => clearTimeout(hoverTooltipTimer));
-$("hover-tooltip").addEventListener("pointerleave", (event) => scheduleHoverTooltipClose(event.relatedTarget));
-$("hover-tooltip").addEventListener("blur", (event) => scheduleHoverTooltipClose(event.relatedTarget));
-$("hover-tooltip").addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    const anchor = hoverTooltipAnchor;
-    anchor?.focus();
+function positionHoverTooltip(anchor) {
+  positionAnchoredPopover($("hover-tooltip"), anchor, { align: "center", side: "top", gap: 8, maxHeight: "min(320px, 55dvh)" });
+}
+
+document.addEventListener("pointerover", (event) => {
+  const tooltip = $("hover-tooltip");
+  if (tooltip.contains(event.target)) {
+    clearTimeout(hoverTooltipTimer);
+    return;
+  }
+  if (event.pointerType === "touch") return;
+  const anchor = event.target.closest("[data-tip]");
+  if (anchor === hoverTooltipAnchor) {
+    clearTimeout(hoverTooltipTimer);
+    return;
+  }
+  if (anchor) showHoverTooltip(anchor, { point: { x: event.clientX, y: event.clientY }, source: "mouse" });
+  else scheduleHoverTooltipClose(event.target);
+});
+document.addEventListener("pointerout", (event) => { if (event.pointerType !== "touch") scheduleHoverTooltipClose(event.relatedTarget); });
+document.addEventListener("focusin", (event) => {
+  if ($("hover-tooltip").contains(event.target)) {
+    clearTimeout(hoverTooltipTimer);
+    return;
+  }
+  const anchor = event.target.closest("[data-tip]");
+  if (anchor && !hoverTooltipTransitioning) {
+    queueMicrotask(() => {
+      if (anchor.contains(document.activeElement) && !(anchor === hoverTooltipAnchor && hoverTooltipSource === "touch"))
+        showHoverTooltip(anchor);
+    });
+  }
+});
+document.addEventListener("focusout", (event) => scheduleHoverTooltipClose(event.relatedTarget));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Tab") closeHoverTooltip();
+  if (event.key === "Escape" && hoverTooltipAnchor) {
+    event.preventDefault();
     closeHoverTooltip();
+  } else if (event.key === "ArrowDown" && tooltipContents.has(event.target)) {
+    event.preventDefault();
+    showHoverTooltip(event.target);
+    $("hover-tooltip").focus({ preventScroll: true });
   }
 });
 document.addEventListener("pointerdown", (event) => {
   if (!$("hover-tooltip").contains(event.target) && !hoverTooltipAnchor?.contains(event.target)) closeHoverTooltip();
 });
+document.addEventListener("pointerup", (event) => {
+  const anchor = event.target.closest("[data-tip]");
+  if (event.pointerType === "touch" && anchor) {
+    if (anchor === hoverTooltipAnchor && hoverTooltipSource === "touch") closeHoverTooltip();
+    else showHoverTooltip(anchor, { source: "touch" });
+  }
+});
 window.addEventListener("resize", closeHoverTooltip);
-document.addEventListener("scroll", (event) => { if (event.target !== $("hover-tooltip")) closeHoverTooltip(); }, true);
+document.addEventListener(
+  "scroll",
+  (event) => {
+    const tooltip = $("hover-tooltip"), anchor = hoverTooltipAnchor;
+    if (!anchor || tooltip.contains(event.target)) return;
+    const bounds = anchor.getBoundingClientRect();
+    const hovered = hoverTooltipPoint && document.elementFromPoint(hoverTooltipPoint.x, hoverTooltipPoint.y);
+    if (
+      bounds.bottom <= 0 || bounds.top >= innerHeight || bounds.right <= 0 || bounds.left >= innerWidth ||
+      (!anchor.contains(document.activeElement) && !tooltip.contains(document.activeElement) && !anchor.contains(hovered) &&
+        !tooltip.contains(hovered))
+    )
+      closeHoverTooltip();
+    else positionHoverTooltip(anchor);
+  },
+  true
+);
 
-function positionAnchoredPopover(node, anchor, alignRight = false) {
+function positionAnchoredPopover(node, anchor, { align = "start", side = "bottom", gap = 6, maxHeight = "80dvh" } = {}) {
   node.style.maxHeight = "";
   const trigger = anchor.getBoundingClientRect();
-  const margin = 12, gap = 6;
+  const margin = 12, viewportWidth = document.documentElement.clientWidth;
   const below = Math.max(0, innerHeight - trigger.bottom - gap - margin);
   const above = Math.max(0, trigger.top - gap - margin);
-  const openAbove = node.offsetHeight > below && above > below;
-  node.style.maxHeight = "min(80dvh, " + (openAbove ? above : below) + "px)";
+  const preferredSpace = side === "top" ? above : below;
+  const openAbove = node.offsetHeight <= preferredSpace ? side === "top" : above > below;
+  node.style.maxHeight = "min(" + maxHeight + ", " + (openAbove ? above : below) + "px)";
   const top = openAbove ? trigger.top - gap - node.offsetHeight : trigger.bottom + gap;
-  const left = alignRight ? trigger.right - node.offsetWidth : trigger.left;
+  const left =
+    align === "center"
+      ? trigger.left + (trigger.width - node.offsetWidth) / 2
+      : align === "end" ? trigger.right - node.offsetWidth : trigger.left;
   node.style.top = Math.max(margin, Math.min(top, innerHeight - node.offsetHeight - margin)) + "px";
-  node.style.left = Math.max(margin, Math.min(left, innerWidth - node.offsetWidth - margin)) + "px";
+  node.style.left = Math.max(margin, Math.min(left, viewportWidth - node.offsetWidth - margin)) + "px";
 }
 
 function switchControl({ input }) {
@@ -344,8 +417,7 @@ function checkboxControl({ input, state = "none" }) {
   return input ? el("span", { class: "checkbox-control" }, input, indicator) : indicator;
 }
 
-// Nodes are cloned because a chip and its tooltip share one item, and messages are flattened
-// because only the string path styles separators; chips rebuild on every language change anyway.
+// A chip and its tooltip must not share DOM nodes.
 function chipText(value) {
   if (Array.isArray(value)) return value.map(chipText);
   if (value?.nodeType) return value.cloneNode(true);
@@ -362,18 +434,13 @@ function settingsChipTooltip(item) {
   );
 }
 
-// A negative tabindex lets a tap focus the chip, so the next tap dismisses the tooltip, without adding a tab stop.
 function chipTooltipProps(item, label) {
-  const show = (event) => {
-    if (label.scrollWidth > label.clientWidth + 1)
-      showHoverTooltip(event.currentTarget, [settingsChipTooltip(item)], { x: event.clientX, y: event.clientY });
-  };
   return {
     tabindex: "-1",
-    onpointerenter: (event) => { if (event.pointerType !== "touch") show(event); },
-    onpointerleave: (event) => scheduleHoverTooltipClose(event.relatedTarget),
-    onclick: show,
-    onblur: (event) => scheduleHoverTooltipClose(event.relatedTarget)
+    tooltip: () =>
+      label.scrollWidth > label.clientWidth + 1
+        ? [settingsChipTooltip(item)]
+        : item.hint ? [el("div", { class: "hover-tooltip-body", text: displayLabel(item.hint) })] : null
   };
 }
 
@@ -386,11 +453,7 @@ function settingsChipList(items, fallback) {
       const label = el("span", { class: "settings-chip-label" + (item.state === "deny" ? " routing-deny" : "") }, chipText(item.text));
       return el(
         "span",
-        {
-          class: "settings-chip" + (item.tag ? " has-tag" : ""),
-          title: item.title ? displayLabel(item.title) : null,
-          ...chipTooltipProps(item, label)
-        },
+        { class: "settings-chip" + (item.tag ? " has-tag" : ""), ...chipTooltipProps(item, label) },
         item.iconName ? actionIcon(item.iconName) : null,
         label,
         item.tag ? el("span", { class: "tag warn", text: item.tag }) : null
@@ -402,19 +465,19 @@ function settingsChipList(items, fallback) {
 function settingsEntryField(label, content) {
   return el(
     "div",
-    { class: "error-event-field settings-entry-field" },
-    el("span", { class: "error-event-field-label", text: displayLabel(label) }),
-    el("div", { class: "error-event-field-value settings-entry-value" }, content)
+    { class: "settings-entry-field" },
+    el("span", { class: "settings-entry-label", text: displayLabel(label) }),
+    el("div", { class: "settings-entry-value" }, content)
   );
 }
 
 function settingsCard(title, fields, onEdit, onDelete) {
   return el(
     "article",
-    { class: "auth-file-card", role: "listitem" },
+    { class: "inset-card settings-entry", role: "listitem" },
     el(
       "div",
-      { class: "event-entry-head settings-entry-header" },
+      { class: "settings-entry-header" },
       el("div", { class: "settings-entry-title", text: displayLabel(title) }),
       el(
         "div",

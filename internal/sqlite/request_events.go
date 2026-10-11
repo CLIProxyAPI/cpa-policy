@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,14 @@ import (
 )
 
 func appendRequestEvent(tx *sql.Tx, entry billing.RequestEvent) (int64, error) {
+	headers := "{}"
+	if len(entry.QuotaHeaders) > 0 {
+		raw, err := json.Marshal(entry.QuotaHeaders)
+		if err != nil {
+			return 0, fmt.Errorf("Encode quota headers: %w", err)
+		}
+		headers = string(raw)
+	}
 	// Only persistence encodes the multiplier into the price source.
 	priceSource := string(entry.PriceSource)
 	switch entry.PriceSource {
@@ -28,8 +37,8 @@ func appendRequestEvent(tx *sql.Tx, entry billing.RequestEvent) (int64, error) {
 			uncached_input_tokens, cache_read_tokens, cache_write_tokens, billed_output_tokens,
 			tiered, long_context, threshold_input_tokens,
 			applied_input_per_1m, applied_output_per_1m,
-			applied_cache_read_per_1m, applied_cache_write_per_1m
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			applied_cache_read_per_1m, applied_cache_write_per_1m, response_headers_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nanos(entry.At), entry.Scope, entry.AuthIndex, entry.Provider, entry.Account, entry.ExecutorType, entry.ReasoningEffort, entry.ServiceTier,
 		entry.ResponseServiceTier, entry.UpstreamModel, entry.ResponseModel, entry.BillingModel, entry.Failed,
 		entry.LatencyMS, entry.TTFTMS,
@@ -40,7 +49,7 @@ func appendRequestEvent(tx *sql.Tx, entry billing.RequestEvent) (int64, error) {
 		entry.Cost.CacheWriteTokens, entry.Cost.BilledOutputTokens,
 		entry.Cost.Tiered, entry.Cost.LongContext, entry.Cost.ThresholdInputTokens,
 		entry.Cost.AppliedInputPer1M, entry.Cost.AppliedOutputPer1M,
-		entry.Cost.AppliedCacheReadPer1M, entry.Cost.AppliedCacheWritePer1M)
+		entry.Cost.AppliedCacheReadPer1M, entry.Cost.AppliedCacheWritePer1M, headers)
 	if errInsert != nil {
 		return 0, fmt.Errorf("Write request event: %w", errInsert)
 	}

@@ -2,6 +2,7 @@ const PLUGIN_BASE = "/v0/management/plugins/cpa-key-billing";
 const ACCOUNT_BASE = "/v0/resource/plugins/cpa-key-billing";
 const CALLER_SCOPE_SALT = "cli-proxy-api:caller-scope:v1\u0000";
 const DISPLAY_SEPARATOR = "\u2009·\u2009";
+const DISPLAY_SLASH = "\u2009/\u2009";
 const $ = (id) => document.getElementById(id);
 const { message: m, setText, setAttribute: setTextAttribute, UIError } = window.billingI18n;
 const locale = () => window.billingI18n.locale();

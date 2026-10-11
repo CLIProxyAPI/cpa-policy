@@ -1,6 +1,9 @@
 package billing
 
-import "time"
+import (
+	"net/http"
+	"time"
+)
 
 // RequestEvent is one persisted request record and never stores a plaintext API key.
 // Account contains only an OAuth identity or masked API key.
@@ -27,7 +30,8 @@ type RequestEvent struct {
 	PriceSource PriceSource `json:"price_source,omitempty"`
 	Cost        Cost        `json:"cost"`
 	// ReasoningTokens is already included in Cost.BilledOutputTokens.
-	ReasoningTokens int64 `json:"reasoning_tokens,omitempty"`
+	ReasoningTokens int64       `json:"reasoning_tokens,omitempty"`
+	QuotaHeaders    http.Header `json:"-"`
 }
 
 const RequestEventRetention = 365 * 24 * time.Hour

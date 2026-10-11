@@ -1,4 +1,4 @@
-const AUTH_CATEGORY_LABELS = { claude: "Claude", antigravity: "Antigravity", codex: "Codex", xai: "xAI", kimi: "Kimi" };
+const AUTH_CATEGORY_LABELS = { claude: "Claude", antigravity: "Antigravity", codex: "Codex", gemini: "Gemini", xai: "xAI", kimi: "Kimi" };
 
 // Tag tones for the plan labels the backend reports, per provider: a Claude Pro is not a Codex Pro 200.
 // Antigravity reports its upstream tier name as is.
@@ -20,14 +20,30 @@ function authPlanTone(category, plan) {
   return Object.entries(AUTH_PLAN_TONES[category] || {}).find(([, plans]) => plans.includes(key))?.[0] || "plain";
 }
 
+function authFileQuota(file, owner) {
+  const manual = owner.authQuotas.get(file.auth_index);
+  const observed = file.quota;
+  if (!manual) return observed;
+  if (!observed) return manual;
+  const rows = new Map(manual.quota.map((row) => [authQuotaRowKey(row), row]));
+  for (const row of observed.quota) {
+    const previous = rows.get(authQuotaRowKey(row));
+    if (!previous || new Date(row.observed_at) > new Date(previous.observed_at || manual.fetched_at)) rows.set(authQuotaRowKey(row), row);
+  }
+  const result = { ...observed, ...manual, quota: [...rows.values()] };
+  for (const field of ["plan", "credit_balance", "credits_unlimited"])
+    if (new Date(observed[field + "_observed_at"]) > new Date(manual.fetched_at)) result[field] = observed[field];
+  return result;
+}
+
+function authQuotaRowKey(row) { return JSON.stringify([row.group_label || "", row.label_prefix || "", row.label || ""]); }
+
 function authFileMeta(file, quota) {
-  const category = AUTH_CATEGORY_LABELS[file.category] || file.category || m("ui.unknown_2");
   const plan = quota?.plan?.trim();
   return el(
     "div",
     { class: "auth-file-meta" },
-    el("span", { class: "tag plain", title: category }, actionIcon("file-key"), el("span", { text: category })),
-    plan && el("span", { class: "tag " + authPlanTone(file.category, plan), title: plan }, el("span", { text: plan })),
+    plan && el("span", { class: "tag " + authPlanTone(file.category, plan) }, el("span", { text: plan })),
     el("span", { class: "tag plain", text: "P" + file.priority }),
     file.unavailable && el("span", { class: "tag bad", text: m("ui.unavailable") })
   );
@@ -46,7 +62,11 @@ function authProviderIcon(category) {
   const key = category === "gemini-cli" || category === "gemini-interactions" ? "gemini" : category;
   const markup = AUTH_PROVIDER_ICONS[key];
   if (!markup) return null;
-  return el("span", { class: "auth-provider-icon", "data-provider": key, "aria-hidden": "true" }, iconSVG(markup));
+  return el(
+    "span",
+    { class: "auth-provider-icon", "data-provider": key, role: "img", "aria-label": AUTH_CATEGORY_LABELS[key] || category },
+    iconSVG(markup)
+  );
 }
 
 function authUI(account) {
@@ -175,7 +195,7 @@ function filteredAuthFiles(account) {
     if (ui.enabledOnly.checked && file.disabled) return false;
     if (provider && file.category !== provider) return false;
     if (!search) return true;
-    const currentPlan = ui.owner.authQuotas.get(file.auth_index)?.plan;
+    const currentPlan = authFileQuota(file, ui.owner)?.plan;
     return [file.name, file.email, currentPlan, file.category].some((value) => String(value || "").toLocaleLowerCase().includes(search));
   });
 }
@@ -193,7 +213,7 @@ function quotaAmount(row) {
   if (!hasUsed && !hasLimit) return "";
   const money = row.currency === "USD";
   const format = (value) => (money ? usd(value) : value.toLocaleString(locale(), { maximumFractionDigits: 2 }));
-  if (hasUsed && hasLimit) return format(row.used) + "/" + format(row.limit);
+  if (hasUsed && hasLimit) return format(row.used) + DISPLAY_SLASH + format(row.limit);
   return hasUsed ? m("ui.used_value", { v0: format(row.used) }) : m("ui.quota_value", { v0: format(row.limit) });
 }
 
@@ -209,23 +229,19 @@ function quotaLabel(row) {
 function renderQuotaRow(row) {
   const label = quotaLabel(row);
   const percent = row.remaining_percent;
-  const hasPercent = percent !== undefined;
+  const hasPercent = Number.isFinite(percent);
   const value = hasPercent ? percent.toFixed(0) + "%" : "—";
   const level = percent >= 70 ? "high" : percent >= 30 ? "medium" : "low";
   const reset = quotaResetMeta(row);
   const amount = quotaAmount(row);
-  const stats = [el("span", { class: "auth-quota-value", text: value })];
-  if (amount) stats.push(el("span", { text: amount }));
-  if (reset.at) stats.push(el("span", { text: reset.at + (reset.after ? DISPLAY_SEPARATOR + reset.after : "") }));
+  const elapsed = row.reset_at && new Date(row.reset_at).getTime() <= Date.now();
+  const resetText =
+    reset.at && m("ui.join", { v0: reset.at, v1: DISPLAY_SEPARATOR, v2: elapsed ? m("ui.quota_reset_elapsed") : reset.after });
   return el(
     "div",
-    { class: "auth-quota-row" },
-    el(
-      "div",
-      { class: "auth-quota-line" },
-      el("span", { class: "auth-quota-label", title: label, text: label }),
-      el("span", { class: "auth-quota-stats" }, stats)
-    ),
+    { class: "auth-quota-row" + (elapsed ? " elapsed" : "") },
+    el("span", { class: "auth-quota-label", "data-tip": label, "data-tip-overflow": "", text: label }),
+    el("span", { class: "auth-quota-value", text: value }),
     el(
       "div",
       {
@@ -237,18 +253,21 @@ function renderQuotaRow(row) {
         "aria-valuenow": hasPercent ? Math.round(percent) : null
       },
       el("i", { class: "quota-fill " + (hasPercent ? level : "high"), style: "width:" + (hasPercent ? percent : 0) + "%" })
-    )
+    ),
+    (amount || resetText) &&
+      el(
+        "div",
+        { class: "auth-quota-stats" },
+        amount && el("span", { class: "auth-quota-amount", text: amount }),
+        resetText && el("span", { class: "auth-quota-reset-time", text: resetText })
+      )
   );
 }
 
 function renderAuthResetCredits(file, result) {
   if (file.category !== "codex") return null;
   const credits = result.rate_limit_reset_credits || [];
-  if (!credits.length) {
-    return result.rate_limit_reset_credits_unavailable
-      ? el("div", { class: "muted small", text: m("ui.reset_credits_expiry_unavailable") })
-      : null;
-  }
+  if (!credits.length) { return el("div", { class: "muted small", text: m("ui.reset_credits_expiry_unavailable") }); }
   const timezone =
     new Intl.DateTimeFormat("en", { timeZoneName: "shortOffset" }).formatToParts(new Date()).find((part) => part.type === "timeZoneName")
       ?.value || "";
@@ -258,9 +277,16 @@ function renderAuthResetCredits(file, result) {
     el("div", { class: "auth-reset-credits-title", text: m("ui.reset_credits_expiry", { v0: timezone }) }),
     credits.map((credit, index) => {
       const expiresAt = new Date(credit.expires_at);
-      const remaining = (expiresAt.getTime() - Date.now()) / 1000;
-      const time = Number.isFinite(remaining)
-        ? compactResetDate(expiresAt) + DISPLAY_SEPARATOR + (remaining <= 0 ? m("ui.expired") : compactResetAfter(remaining))
+      const time = Number.isFinite(expiresAt.getTime())
+        ? new Intl.DateTimeFormat("sv-SE", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false
+          }).format(expiresAt)
         : credit.expires_at || "—";
       return el(
         "div",
@@ -274,16 +300,6 @@ function renderAuthResetCredits(file, result) {
 
 function canRefreshAuthQuota(file) { return file.quota_supported && !file.disabled; }
 
-// Without stored quota, the card body offers the refresh, as CPAMC does. The backend reports disabled
-// files as unsupported; their prompt stays visible but disabled.
-function authQuotaIdle(file, owner) {
-  const index = file.auth_index;
-  return (
-    (file.quota_supported || file.disabled) && !owner.authQuotaLoading.has(index) && !owner.authQuotaErrors.get(index) &&
-    !owner.authQuotas.get(index)
-  );
-}
-
 function authQuotaRefreshTitle(file) {
   if (file.quota_supported) return null;
   return (
@@ -295,44 +311,34 @@ function authQuotaRefreshTitle(file) {
 function renderAuthFileQuota(file, account) {
   const owner = account ? accountUIState : adminUIState;
   const index = file.auth_index;
-  if (owner.authQuotaLoading.has(index)) {
+  const result = authFileQuota(file, owner);
+  if (owner.authQuotaLoading.has(index) && !result) {
     return el("div", { class: "auth-file-quota" }, el("div", { class: "muted small", text: m("ui.updating_quotas") }));
   }
   const error = owner.authQuotaErrors.get(index);
-  if (error) return el("div", { class: "auth-file-quota" }, el("div", { class: "auth-quota-error", text: error }));
-  if (authQuotaIdle(file, owner)) {
-    return el(
-      "div",
-      { class: "auth-file-quota idle" },
-      el(
-        "button",
-        {
-          type: "button",
-          class: "auth-quota-idle",
-          disabled: !canRefreshAuthQuota(file) || authUI(account).bulk.dataset.loading === "true",
-          title: authQuotaRefreshTitle(file),
-          onclick: () => guard(() => refreshAuthQuota(file, account))
-        },
-        actionIcon("refresh"),
-        el("span", { text: m("ui.click_here_to_refresh_quota") })
-      )
+  if (error && !result) return el("div", { class: "auth-file-quota" }, el("div", { class: "auth-quota-error", text: error }));
+  if (!result) return el("div", { class: "muted small", text: authQuotaRefreshTitle(file) || m("ui.refresh_to_query_quota") });
+  const summary = [];
+  const balance = Number(result.credit_balance);
+  if (result.credits_unlimited || (Number.isFinite(balance) && balance !== 0)) {
+    const credits = result.credits_unlimited ? m("ui.unlimited") : result.credit_currency === "USD" ? usd(balance) : result.credit_balance;
+    summary.push(el("span", { text: m("ui.credits_value", { v0: credits }) }));
+  }
+  if (Number.isFinite(result.rate_limit_reset_credits_available_count)) {
+    summary.push(
+      el("span", {
+        class: "auth-reset-count",
+        text: m("ui.available_resets_value", { v0: int(result.rate_limit_reset_credits_available_count) }),
+        ...hoverTooltipProps(() => [renderAuthResetCredits(file, result)], file.category === "codex")
+      })
     );
   }
-  const result = owner.authQuotas.get(index);
-  if (!result) return null;
-  const summary = [];
-  const credits = result.credits_unlimited
-    ? m("ui.unlimited")
-    : result.credit_currency === "USD" ? usd(Number(result.credit_balance)) : result.credit_balance;
-  if (credits) summary.push(el("span", { text: m("ui.credits_value", { v0: credits }) }));
-  if (Number.isFinite(result.rate_limit_reset_credits_available_count))
-    summary.push(el("span", { text: m("ui.available_resets_value", { v0: int(result.rate_limit_reset_credits_available_count) }) }));
   const rows = result.quota;
   return el(
     "div",
     { class: "auth-file-quota" },
     summary.length ? el("div", { class: "auth-quota-summary" }, summary) : null,
-    renderAuthResetCredits(file, result),
+    error && el("div", { class: "auth-quota-error", text: error }),
     rows.length
       ? el("div", { class: "auth-quota-list" }, rows.map(renderQuotaRow))
       : el("div", { class: "muted small", text: m("ui.the_upstream_returned_no_displayable_quota") })
@@ -348,96 +354,154 @@ function renderAuthFiles(account) {
   const files = filteredAuthFiles(account);
   const refreshable = files.filter(canRefreshAuthQuota).length;
   ui.bulk.disabled = refreshable === 0 || ui.bulk.dataset.loading === "true";
-  // Redraw cards in place: a replacement card under the pointer would replay its hover lift.
-  const grid = ui.body.querySelector(":scope > .auth-file-grid");
-  const cards = new Map(Array.from(grid?.children || [], (card) => [card.dataset.authIndex, card]));
-  const renderCard = (file) => {
-    const quota = ui.owner.authQuotas.get(file.auth_index);
-    const loading = ui.owner.authQuotaLoading.has(file.auth_index);
-    const resettable =
-      (!account || resources.account.profile.value?.can_reset_auth_quota === true) &&
-      Number.isFinite(quota?.rate_limit_reset_credits_available_count);
-    const actions = [
-      resettable &&
-        el(
-          "button",
-          {
-            type: "button",
-            class: "labeled-icon-button",
-            disabled: !canResetAuthQuota(file, account),
-            onclick: () => guard(() => resetAuthQuota(file, account))
-          },
-          actionIcon("party-popper"),
-          m("ui.reset_quota")
-        ),
-      !authQuotaIdle(file, ui.owner) &&
-        el(
-          "button",
-          {
-            type: "button",
-            class: "labeled-icon-button auth-quota-refresh" + (loading ? " loading" : ""),
-            disabled: !canRefreshAuthQuota(file) || loading || ui.bulk.dataset.loading === "true",
-            "aria-label": m("ui.update_quotas"),
-            title: authQuotaRefreshTitle(file) || m("ui.update_quotas"),
-            onclick: () => guard(() => refreshAuthQuota(file, account))
-          },
-          actionIcon("refresh"),
-          el("span", { class: "labeled-icon-text" }, m("ui.update_quotas"))
-        ),
-      !account &&
-        el(
-          "button",
-          {
-            type: "button",
-            role: "switch",
-            class: "labeled-icon-button switch-button",
-            "aria-checked": String(!file.disabled),
-            disabled: adminUIState.authStatusSubmissions.has(file.auth_index),
-            onclick: () => guard(() => setAuthFileEnabled(file, file.disabled))
-          },
-          el("span", { class: "switch-track", "aria-hidden": "true" }),
-          m("ui.enable")
-        )
-    ];
-    const card = cards.get(file.auth_index) || el("article", { class: "auth-file-card", "data-auth-index": file.auth_index });
-    card.classList.toggle("disabled", file.disabled);
-    // DOM replaceChildren renders null as text, unlike el().
-    card.replaceChildren(
-      ...[
+  renderCollection(ui.body, files, {
+    headers: [
+      m("ui.auth_files"),
+      m("ui.auth_requests_30_days"),
+      m("ui.auth_total_tokens"),
+      m("ui.cache_rate"),
+      { label: m("ui.quota"), class: "auth-quota-column" },
+      m("ui.actions")
+    ],
+    attrs: { class: "auth-file-table" },
+    empty: m("ui.no_auth_files_match_the_filters"),
+    render: (file) => renderAuthFileRow(file, account)
+  });
+}
+
+function renderAuthFileRow(file, account) {
+  const ui = authUI(account);
+  const quota = authFileQuota(file, ui.owner);
+  const loading = ui.owner.authQuotaLoading.has(file.auth_index);
+  const resettable =
+    (!account || resources.account.profile.value?.can_reset_auth_quota === true) &&
+    Number(quota?.rate_limit_reset_credits_available_count) > 0;
+  const quotaActions = el(
+    "div",
+    { class: "auth-quota-actions" },
+    resettable &&
+      el(
+        "button",
+        {
+          type: "button",
+          class: "labeled-icon-button auth-quota-reset",
+          "aria-label": m("ui.reset_quota"),
+          ...hoverTooltipProps(
+            () => [el("span", { text: m("ui.reset_opportunities", { count: quota.rate_limit_reset_credits_available_count }) })],
+            true
+          ),
+          disabled: !canResetAuthQuota(file, account),
+          onclick: () => guard(() => resetAuthQuota(file, account))
+        },
+        actionIcon("party-popper")
+      ),
+    el(
+      "button",
+      {
+        type: "button",
+        class: "labeled-icon-button auth-quota-refresh" + (loading ? " loading" : ""),
+        disabled: !canRefreshAuthQuota(file) || loading || ui.bulk.dataset.loading === "true",
+        "aria-label": m("ui.update_quotas"),
+        "data-tip": authQuotaRefreshTitle(file) || m("ui.update_quotas"),
+        onclick: () => guard(() => refreshAuthQuota(file, account))
+      },
+      actionIcon("refresh")
+    )
+  );
+  return el(
+    "tr",
+    { class: "auth-file-row" + (file.disabled ? " disabled" : ""), "data-auth-index": file.auth_index },
+
+    el(
+      "td",
+      { class: "auth-identity-cell" },
+      el(
+        "div",
+        { class: "auth-file-head" },
+        authProviderIcon(file.category),
         el(
           "div",
-          { class: "auth-file-head" },
-          authProviderIcon(file.category),
-          el(
-            "div",
-            { class: "auth-file-identity" },
-            el("div", {
-              class: "auth-file-email-title mask-blur",
-              title: file.email || m("ui.no_email_provided"),
-              text: file.email || m("ui.no_email_provided")
-            }),
-            authFileMeta(file, quota)
-          )
-        ),
-        renderAuthFileQuota(file, account),
-        el("div", { class: "auth-file-footer" }, actions)
-      ].filter(Boolean)
+          { class: "auth-file-identity" },
+          el("div", {
+            class: "auth-file-email-title mask-blur",
+            "data-tip": file.email || file.name,
+            "data-tip-overflow": "",
+            text: file.email || file.name || m("ui.no_email_provided")
+          }),
+          authFileMeta(file, quota)
+        )
+      )
+    ),
+    renderAuthFileUsage(file),
+    el("td", { class: "auth-quota-cell" }, renderAuthFileQuota(file, account)),
+    el(
+      "td",
+      { class: "auth-actions-cell" },
+      el(
+        "div",
+        { class: "auth-file-actions" },
+        quotaActions,
+        !account &&
+          switchControl({
+            input: el("input", {
+              type: "checkbox",
+              role: "switch",
+              checked: !file.disabled,
+              "aria-label": m("ui.enable"),
+              "data-tip": "",
+              disabled: adminUIState.authStatusSubmissions.has(file.auth_index),
+              onchange: (event) => guard(() => setAuthFileEnabled(file, event.target.checked))
+            })
+          })
+      )
+    )
+  );
+}
+
+function renderAuthFileUsage(file) {
+  const usage = file.usage || {};
+  const count = usage.requests || 0;
+  const failed = usage.failed || 0;
+  const success = count ? (((count - failed) / count) * 100).toFixed(2) + "%" : "—";
+  const total = (usage.input_tokens || 0) + (usage.output_tokens || 0);
+  const cache = usage.input_tokens ? ((usage.cache_read_tokens / usage.input_tokens) * 100).toFixed(2) + "%" : "—";
+  const metric = (name, label, value, detail, secondary) =>
+    el(
+      "td",
+      { class: "auth-" + name + "-cell" },
+      el(
+        "div",
+        { class: "auth-usage-metric" },
+        el("span", { class: "auth-usage-label", text: label }),
+        el("span", { class: "auth-usage-value", "data-tip": detail }, value)
+      ),
+      secondary &&
+        el(
+          "div",
+          { class: "auth-usage-detail" },
+          el("span", { class: "auth-usage-detail-label", text: m("ui.success_rate") }),
+          el("span", { class: "auth-usage-detail-value", text: secondary })
+        )
     );
-    return card;
-  };
-  if (grid && files.length) {
-    files.forEach((file, index) => {
-      const card = renderCard(file);
-      if (grid.children[index] !== card) grid.insertBefore(card, grid.children[index] || null);
-    });
-    while (grid.children.length > files.length) grid.lastElementChild.remove();
-    return;
-  }
-  renderCollection(ui.body, files, {
-    attrs: { class: "auth-file-grid" },
-    empty: m("ui.no_auth_files_match_the_filters"),
-    render: renderCard
-  });
+  const requests = [
+    tokens(count, 2),
+    " (",
+    el("span", { class: "auth-request-success", text: tokens(count - failed, 2) }),
+    DISPLAY_SLASH,
+    el("span", { class: "auth-request-failed", text: tokens(failed, 2) }),
+    ")"
+  ];
+  return [
+    metric(
+      "requests",
+      m("ui.requests"),
+      requests,
+      count >= 1000 ? m("ui.auth_request_outcomes", { v0: int(count - failed), v1: int(failed) }) : null,
+      success
+    ),
+    metric("tokens", m("ui.auth_total_tokens"), tokens(total), total >= 1000 ? exactTokens(total) : null),
+    metric("cache", m("ui.cache_rate"), cache)
+  ];
 }
 
 async function setAuthFileEnabled(file, enabled) {
@@ -483,12 +547,21 @@ async function resetAuthQuota(file, account) {
   if (!canResetAuthQuota(file, account)) return;
   const owner = account ? accountUIState : adminUIState;
   const generation = authQuotaGeneration[account ? "account" : "admin"], index = file.auth_index;
+  const quota = owner.authQuotas.get(index);
   await openActionDialog(
-    m("ui.reset_quota"),
-    m("ui.available_resets_value_use_one_reset_now", {
-      v0: int(owner.authQuotas.get(index).rate_limit_reset_credits_available_count),
-      v1: file.name
-    }),
+    m("ui.reset_provider_quota", { v0: AUTH_CATEGORY_LABELS[file.category] || file.category }),
+    el(
+      "div",
+      { class: "auth-reset-confirmation" },
+      el(
+        "div",
+        { class: "auth-reset-available" },
+        el("span", { class: "auth-reset-count-badge", text: int(quota.rate_limit_reset_credits_available_count) }),
+        m("ui.available_reset_count")
+      ),
+      el("div", { text: m("ui.consume_one_reset_now") }),
+      renderAuthResetCredits(file, quota)
+    ),
     undefined,
     async () => {
       if (!authQuotaCacheCurrent(account, owner, generation, index) || !canResetAuthQuota(file, account)) {
@@ -534,7 +607,8 @@ async function resetAuthQuota(file, account) {
           failed ? "err" : "ok"
         );
       }
-    }
+    },
+    m("ui.confirm_reset")
   );
 }
 

@@ -341,10 +341,7 @@ function bindPagedListScroll(list) {
     if (event.target === scroller && dragTop !== null && scroller.scrollTop > dragTop) list.loadMore(true);
     dragTop = null;
   });
-  on("scroll", () => {
-    hideCostTooltip();
-    list.loadMore();
-  });
+  on("scroll", () => { list.loadMore(); });
 }
 
 const pagedLists = {

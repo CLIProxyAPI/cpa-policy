@@ -72,8 +72,8 @@
                 class="icon-action privacy-mask-button"
                 type="button"
                 aria-pressed="false"
-                title="Blur API keys, labels, and account emails"
-                data-i18n-title="ui.blur_api_keys_labels_and_account_emails"
+                data-tip="Blur API keys, labels, and account emails"
+                data-i18n-data-tip="ui.blur_api_keys_labels_and_account_emails"
               ></button>
               <button type="button" class="icon-action" data-page-action="refresh" aria-label="Refresh" data-i18n-aria-label="ui.refresh"></button>
             </div>
@@ -92,7 +92,7 @@
                 <div id="shared-time-popover" class="time-range-popover hidden" role="dialog" aria-label="Select time range" data-i18n-aria-label="ui.select_time_range"></div>
               </div>
             </div>
-            <button id="events-export" class="labeled-icon-button hidden" type="button" title="Export" data-i18n-title="ui.export" data-i18n="ui.export">Export</button>
+            <button id="events-export" class="labeled-icon-button hidden" type="button" data-tip="Export" data-i18n-data-tip="ui.export" data-i18n="ui.export">Export</button>
           </div>
         </div>
         <div id="shared-time-backdrop" class="time-range-backdrop hidden"></div>
@@ -269,7 +269,7 @@
                 <button id="auth-refresh-filtered" class="labeled-icon-button" type="button" data-i18n="ui.update_quotas">Refresh quota</button>
               </div>
             </div>
-            <div id="auth-files-body"></div>
+            <div id="auth-files-body" class="auth-file-list"></div>
           </div>
         </section>
 
@@ -333,8 +333,8 @@
                   class="icon-action privacy-mask-button"
                   type="button"
                   aria-pressed="false"
-                  title="Blur API keys, labels, and account emails"
-                  data-i18n-title="ui.blur_api_keys_labels_and_account_emails"
+                  data-tip="Blur API keys, labels, and account emails"
+                  data-i18n-data-tip="ui.blur_api_keys_labels_and_account_emails"
                 ></button>
                 <button type="button" class="icon-action" data-page-action="refresh" aria-label="Refresh" data-i18n-aria-label="ui.refresh"></button>
               </div>
@@ -356,7 +356,7 @@
                   <div id="account-shared-time-popover" class="time-range-popover hidden" role="dialog" aria-label="Select time range" data-i18n-aria-label="ui.select_time_range"></div>
                 </div>
               </div>
-              <button id="account-events-export" class="labeled-icon-button hidden" type="button" title="Export" data-i18n-title="ui.export" data-i18n="ui.export">Export</button>
+              <button id="account-events-export" class="labeled-icon-button hidden" type="button" data-tip="Export" data-i18n-data-tip="ui.export" data-i18n="ui.export">Export</button>
             </div>
           </div>
           <div id="account-shared-time-backdrop" class="time-range-backdrop hidden"></div>
@@ -444,7 +444,7 @@
                   <button id="account-auth-refresh-filtered" class="labeled-icon-button" type="button" data-i18n="ui.update_quotas">Refresh quota</button>
                 </div>
               </div>
-              <div id="account-auth-files-body"></div>
+              <div id="account-auth-files-body" class="auth-file-list"></div>
             </div>
           </section>
         </section>
@@ -453,7 +453,7 @@
     <footer class="page-footer">
       <span>© 2026 <a href="https://github.com/haowang02/cpa-plugin-key-billing" target="_blank" rel="noopener noreferrer">CPA Key Billing</a></span>
       <span>&thinsp;·&thinsp;<a href="https://github.com/haowang02/cpa-plugin-key-billing/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" data-i18n="ui.license">License</a></span>
-      <span>&thinsp;·&thinsp;<span data-i18n="ui.version">Version</span>: v1.3.19</span>
+      <span>&thinsp;·&thinsp;<span data-i18n="ui.version">Version</span>: v1.3.20</span>
     </footer>
 
     <div id="notice" class="notice" popover="manual"></div>
@@ -487,12 +487,10 @@
     <dialog id="action-dialog">
       <h2 id="action-dialog-title"></h2>
       <div class="editor-state notice hidden"></div>
-      <p id="action-text" class="muted small" style="white-space: pre-line"></p>
+      <div id="action-content" class="muted small" style="white-space: pre-line"></div>
       <input id="action-input" class="dialog-input" />
       <div class="row dialog-actions"> <button id="action-cancel" data-i18n="ui.cancel">Cancel</button> <button id="action-confirm" class="primary" data-i18n="ui.confirm">Confirm</button> </div>
     </dialog>
-
-    <div id="cost-tooltip" class="cost-tooltip" role="tooltip" aria-hidden="true"></div>
 
     <div id="hover-tooltip" class="hover-tooltip" popover="manual" role="tooltip" tabindex="0"></div>
 
@@ -503,8 +501,8 @@
       <div class="route-form-toolbar">
         <input id="route-picker-search" type="search" placeholder="Search routing rules, upstream credentials, or models" aria-label="Search routing rules, upstream credentials, or models" autocomplete="off"  data-i18n-placeholder="ui.search_routing_rules_upstream_credentials_or_models" data-i18n-aria-label="ui.search_routing_rules_upstream_credentials_or_models"/>
         <div class="row compact-actions">
-          <button id="route-picker-all" class="link" type="button" title="Assign matching routing rules and allow matching models and credentials" data-i18n="ui.allow_all" data-i18n-title="ui.bind_filtered_routing_rules_and_allow_filtered_models_and_credentials">Allow all</button>
-          <button id="route-picker-deny-all" class="link" type="button" title="Assign matching routing rules and deny matching models and credentials" data-i18n="ui.deny_all" data-i18n-title="ui.bind_filtered_routing_rules_and_deny_filtered_models_and_credentials">Deny all</button>
+          <button id="route-picker-all" class="link" type="button" data-tip="Assign matching routing rules and allow matching models and credentials" data-i18n="ui.allow_all" data-i18n-data-tip="ui.bind_filtered_routing_rules_and_allow_filtered_models_and_credentials">Allow all</button>
+          <button id="route-picker-deny-all" class="link" type="button" data-tip="Assign matching routing rules and deny matching models and credentials" data-i18n="ui.deny_all" data-i18n-data-tip="ui.bind_filtered_routing_rules_and_deny_filtered_models_and_credentials">Deny all</button>
           <button id="route-picker-clear" class="link" type="button" data-i18n="ui.clear">Clear</button>
         </div>
       </div>

@@ -28,7 +28,7 @@ async function setLoginMode(mode, preserveError) {
 function showGate(mode, error) {
   sessionGeneration++;
   hideNotice();
-  hideCostTooltip();
+  closeHoverTooltip();
   try { sessionStorage.removeItem(SESSION_CREDENTIAL_PREFIX + mode); } catch (_) {}
   for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
   for (const controller of activeRequests) controller.abort();
@@ -196,7 +196,6 @@ function privacyMaskButton(role) { return $((role === "account" ? "account-" : "
 function setPrivacyMask(role, masked) {
   const button = privacyMaskButton(role);
   button.setAttribute("aria-pressed", String(masked));
-  // setActionIcon would replace the descriptive title.
   button.replaceChildren(actionIcon(masked ? "eye-off" : "eye"));
   setTextAttribute(button, "aria-label", m("ui.mask"));
   document.body.classList.toggle("privacy-masked", masked);
@@ -361,7 +360,7 @@ function addLanguageControl(group) {
       "aria-haspopup": "menu",
       "aria-expanded": "false",
       "aria-label": m("language.select"),
-      title: m("language.select"),
+      "data-tip": m("language.select"),
       onclick: () => {
         if (menu.matches(":popover-open")) return menu.hidePopover();
         const current = window.billingI18n.current();
@@ -382,7 +381,7 @@ function addLanguageControl(group) {
           )
         );
         menu.showPopover();
-        positionAnchoredPopover(menu, button, true);
+        positionAnchoredPopover(menu, button, { align: "end" });
         menu.querySelector('[aria-checked="true"]')?.focus({ preventScroll: true });
       }
     },
@@ -427,7 +426,7 @@ function updateRefreshButtons() {
     button.disabled = !!page?.task;
     setTextAttribute(
       button,
-      "title",
+      "data-tip",
       setTextAttribute(button, "aria-label", label ? m("ui.refresh_value", { v0: label }) : m("ui.refresh"))
     );
   }

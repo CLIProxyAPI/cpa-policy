@@ -13,6 +13,7 @@ type Repository interface {
 	RequestEvents(query RequestEventQuery, since time.Time) (RequestEventView, error)
 	RequestErrors(query RequestErrorQuery, since time.Time) (RequestErrorView, error)
 	Analysis(query RequestEventQuery, since time.Time) (AnalysisView, error)
+	CredentialUsage(authIndexes []string, scope string, since time.Time) (map[string]CredentialUsage, error)
 
 	AppendPluginLog(entry PluginLog, cutoff time.Time) error
 	PluginLogsPage(query PluginLogQuery) (PluginLogPage, error)

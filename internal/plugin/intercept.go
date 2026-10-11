@@ -187,6 +187,7 @@ func (a *App) handleUsage(raw []byte) ([]byte, error) {
 	if record.Failed {
 		recordError = usageFailureDetails(record.Failure)
 	}
+	at := a.store.Now()
 	event := billing.UsageEvent{
 		Scope:               scope,
 		KeyPreview:          billing.PreviewKey(record.APIKey),
@@ -194,6 +195,7 @@ func (a *App) handleUsage(raw []byte) ([]byte, error) {
 		Provider:            record.Provider,
 		ExecutorType:        record.ExecutorType,
 		AuthType:            record.AuthType,
+		QuotaHeaders:        usageQuotaHeaders(record, at),
 		Account:             record.Source,
 		ReasoningEffort:     record.ReasoningEffort,
 		ServiceTier:         record.ServiceTier,
@@ -205,7 +207,7 @@ func (a *App) handleUsage(raw []byte) ([]byte, error) {
 		Latency:             record.Latency,
 		TTFT:                record.TTFT,
 		Breakdown:           usageBreakdown(record),
-		At:                  a.store.Now(),
+		At:                  at,
 	}
 	if record.Failed {
 		a.store.RecordUsageError(event, recordError)

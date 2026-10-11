@@ -18,6 +18,10 @@ type memoryRepository struct {
 	closeFail       error
 }
 
+func (r *memoryRepository) CredentialUsage(authIndexes []string, scope string, since time.Time) (map[string]CredentialUsage, error) {
+	return map[string]CredentialUsage{}, r.fail
+}
+
 func (r *memoryRepository) Load(requestCutoff, pluginCutoff time.Time) (Snapshot, error) {
 	if r.state == nil {
 		r.state = NewState()

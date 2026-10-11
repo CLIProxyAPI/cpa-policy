@@ -18,7 +18,7 @@ const (
 const (
 	PluginID   = "cpa-key-billing"
 	PluginName = "cpa-key-billing"
-	Version    = "1.3.19"
+	Version    = "1.3.20"
 
 	MenuLabel       = "API Key Billing"
 	MenuDescription = "Manage downstream API key routing, billing, concurrency limits, subscription quotas, and usage"
@@ -157,6 +157,7 @@ type UsageRecord struct {
 	ServiceTier         string        `json:"ServiceTier"`
 	ResponseServiceTier string        `json:"ResponseServiceTier"`
 	ResponseModel       string        `json:"ResponseModel"`
+	ResponseHeaders     http.Header   `json:"ResponseHeaders"`
 	Generate            bool          `json:"Generate"`
 	RequestedAt         time.Time     `json:"RequestedAt"`
 	Latency             time.Duration `json:"Latency"`

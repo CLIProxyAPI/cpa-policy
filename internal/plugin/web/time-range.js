@@ -99,7 +99,7 @@ function positionSharedTimePopover(account) {
     popover.style.cssText = "";
     return;
   }
-  positionAnchoredPopover(popover, $(sharedTimeID(account, "trigger")), true);
+  positionAnchoredPopover(popover, $(sharedTimeID(account, "trigger")), { align: "end" });
 }
 
 function localDay(date) { return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime(); }
