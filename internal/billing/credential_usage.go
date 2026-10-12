@@ -6,11 +6,12 @@ import (
 )
 
 type CredentialUsageStats struct {
-	Requests        int64 `json:"requests"`
-	Failed          int64 `json:"failed"`
-	InputTokens     int64 `json:"input_tokens"`
-	CacheReadTokens int64 `json:"cache_read_tokens"`
-	OutputTokens    int64 `json:"output_tokens"`
+	Requests        int64   `json:"requests"`
+	Failed          int64   `json:"failed"`
+	InputTokens     int64   `json:"input_tokens"`
+	CacheReadTokens int64   `json:"cache_read_tokens"`
+	OutputTokens    int64   `json:"output_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
 }
 
 type QuotaHeaderObservation struct {

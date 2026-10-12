@@ -1276,6 +1276,10 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
   .auth-actions-cell { grid-area: actions; }
   .auth-quota-actions { flex-direction: row; }
   .auth-usage-label { display: block; }
+  .auth-usage-detail.inline { display: inline-flex; gap: 0; margin: 0 0 0 4px; font-size: inherit; }
+  .auth-usage-detail.inline .auth-usage-detail-label { display: none; }
+  .auth-usage-detail.inline::before { content: "("; }
+  .auth-usage-detail.inline::after { content: ")"; }
   .auth-quota-list { gap: 10px 16px; }
   .auth-quota-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 5px 7px; }
   .auth-quota-label { grid-column: 1; grid-row: 1; }

@@ -139,6 +139,9 @@ func TestAuthFilesStatisticsFollowTimeRangeAndAccountScope(t *testing.T) {
 		}
 		publishUsageRecord(t, app, record)
 	}
+	if _, err := app.store.UpsertPrice(billing.CustomPrice{ModelID: "gpt-5.5", PriceRates: billing.PriceRates{InputPer1M: 99}}); err != nil {
+		t.Fatal(err)
+	}
 	app.SetHostCaller(func(method string, _ any) (json.RawMessage, error) {
 		if method != hostAuthList {
 			t.Fatalf("unexpected host method: %s", method)
@@ -151,11 +154,11 @@ func TestAuthFilesStatisticsFollowTimeRangeAndAccountScope(t *testing.T) {
 		query     url.Values
 		want      billing.CredentialUsageStats
 	}{
-		{"selected", "", query, billing.CredentialUsageStats{Requests: 3, Failed: 1, InputTokens: 200, CacheReadTokens: 100, OutputTokens: 40}},
-		{"account", accountTestKeyA, query, billing.CredentialUsageStats{Requests: 2, Failed: 1, InputTokens: 100, CacheReadTokens: 50, OutputTokens: 20}},
-		{"default", "", nil, billing.CredentialUsageStats{Requests: 5, Failed: 1, InputTokens: 400, CacheReadTokens: 200, OutputTokens: 80}},
+		{"selected", "", query, billing.CredentialUsageStats{Requests: 3, Failed: 1, InputTokens: 200, CacheReadTokens: 100, OutputTokens: 40, CostUSD: 0.00019}},
+		{"account", accountTestKeyA, query, billing.CredentialUsageStats{Requests: 2, Failed: 1, InputTokens: 100, CacheReadTokens: 50, OutputTokens: 20, CostUSD: 0.000095}},
+		{"default", "", nil, billing.CredentialUsageStats{Requests: 5, Failed: 1, InputTokens: 400, CacheReadTokens: 200, OutputTokens: 80, CostUSD: 0.00038}},
 		{"extended", "", url.Values{"from": {from.Add(-60 * 24 * time.Hour).Format(time.RFC3339Nano)}},
-			billing.CredentialUsageStats{Requests: 6, Failed: 1, InputTokens: 500, CacheReadTokens: 250, OutputTokens: 100}},
+			billing.CredentialUsageStats{Requests: 6, Failed: 1, InputTokens: 500, CacheReadTokens: 250, OutputTokens: 100, CostUSD: 0.000475}},
 		{"empty", "", url.Values{"from": {to.Add(time.Minute).Format(time.RFC3339Nano)}}, billing.CredentialUsageStats{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -169,7 +172,13 @@ func TestAuthFilesStatisticsFollowTimeRangeAndAccountScope(t *testing.T) {
 			if err := json.Unmarshal(response.Body, &view); err != nil {
 				t.Fatal(err)
 			}
-			if response.StatusCode != http.StatusOK || len(view.Files) != 1 || view.Files[0].Usage != tc.want {
+			if response.StatusCode != http.StatusOK || len(view.Files) != 1 {
+				t.Fatalf("response=%s, want=%+v", response.Body, tc.want)
+			}
+			got := view.Files[0].Usage
+			assertCostClose(t, got.CostUSD, tc.want.CostUSD)
+			got.CostUSD = tc.want.CostUSD
+			if got != tc.want {
 				t.Fatalf("response=%s, want=%+v", response.Body, tc.want)
 			}
 			quota := view.Files[0].Quota

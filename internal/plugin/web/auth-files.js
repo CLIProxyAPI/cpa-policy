@@ -492,24 +492,27 @@ function renderAuthFileUsage(file) {
   const success = count ? (((count - failed) / count) * 100).toFixed(2) + "%" : "—";
   const total = (usage.input_tokens || 0) + (usage.output_tokens || 0);
   const cache = usage.input_tokens ? ((usage.cache_read_tokens / usage.input_tokens) * 100).toFixed(2) + "%" : "—";
-  const metric = (name, label, value, detail, secondary) =>
-    el(
+  const metric = (name, label, value, tooltip, secondary) => {
+    const detail =
+      secondary &&
+      el(
+        "span",
+        { class: "auth-usage-detail" + (secondary.inline ? " inline" : "") },
+        el("span", { class: "auth-usage-detail-label", text: secondary.label }),
+        el("span", { class: "auth-usage-detail-value", text: secondary.value })
+      );
+    return el(
       "td",
       { class: "auth-" + name + "-cell" },
       el(
         "div",
         { class: "auth-usage-metric" },
         el("span", { class: "auth-usage-label", text: label }),
-        el("span", { class: "auth-usage-value", "data-tip": detail }, value)
+        el("span", { class: "auth-usage-value", "data-tip": tooltip }, value, secondary?.inline && detail)
       ),
-      secondary &&
-        el(
-          "div",
-          { class: "auth-usage-detail" },
-          el("span", { class: "auth-usage-detail-label", text: m("ui.success_rate") }),
-          el("span", { class: "auth-usage-detail-value", text: secondary })
-        )
+      !secondary?.inline && detail
     );
+  };
   const requests = [
     tokens(count, 2),
     " (",
@@ -524,9 +527,13 @@ function renderAuthFileUsage(file) {
       m("ui.requests"),
       requests,
       count >= 1000 ? m("ui.auth_request_outcomes", { v0: int(count - failed), v1: int(failed) }) : null,
-      success
+      { label: m("ui.success_rate"), value: success }
     ),
-    metric("tokens", m("ui.auth_total_tokens"), tokens(total), total >= 1000 ? exactTokens(total) : null),
+    metric("tokens", m("ui.auth_total_tokens"), tokens(total), total >= 1000 ? exactTokens(total) : null, {
+      label: m("ui.cost"),
+      value: usd(usage.cost_usd, 2),
+      inline: true
+    }),
     metric("cache", m("ui.cache_rate"), cache)
   ];
 }

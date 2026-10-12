@@ -1,9 +1,9 @@
-function usd(value) {
+function usd(value, fixedDigits) {
   const amount = Number(value || 0);
-  if (amount === 0) return "$0";
   const absolute = Math.abs(amount);
-  const digits = absolute >= 1 ? 2 : absolute >= 0.01 ? 4 : 6;
-  const compact = amount.toLocaleString("en-US", { maximumFractionDigits: digits });
+  const digits = fixedDigits ?? (absolute >= 1 ? 2 : absolute >= 0.01 ? 4 : 6);
+  const compact = amount.toLocaleString("en-US", { minimumFractionDigits: fixedDigits ?? 0, maximumFractionDigits: digits });
+  if (amount === 0 || fixedDigits !== undefined) return "$" + compact;
   const rounded = Number(compact.replaceAll(",", ""));
   if (rounded === 0) return "<$0.000001";
   const tolerance = Number.EPSILON * Math.max(1, absolute) * 8;

@@ -460,6 +460,7 @@ def auth_file_views(files, query, scope=""):
                                     ("uncached_input_tokens", "cache_read_tokens", "cache_write_tokens")) for row in rows),
             "cache_read_tokens": sum(row["cost"].get("cache_read_tokens", 0) for row in rows),
             "output_tokens": sum(row["cost"].get("billed_output_tokens", 0) for row in rows),
+            "cost_usd": sum(row["cost"].get("total_usd", 0) for row in rows),
         }
         if item["category"] in ("codex", "claude"):
             quota = auth_file_quota({"auth_index": [item["auth_index"]]})

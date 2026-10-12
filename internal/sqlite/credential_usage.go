@@ -44,7 +44,7 @@ func (d *DB) credentialUsageStats(filter string, args []any) (map[string]billing
 	result := make(map[string]billing.CredentialUsage)
 	rows, err := d.db.Query(`SELECT auth_index, count(*), coalesce(sum(failed != 0), 0),
 		coalesce(sum(uncached_input_tokens + cache_read_tokens + cache_write_tokens), 0),
-		coalesce(sum(cache_read_tokens), 0), coalesce(sum(billed_output_tokens), 0)
+		coalesce(sum(cache_read_tokens), 0), coalesce(sum(billed_output_tokens), 0), coalesce(sum(total_usd), 0)
 		FROM request_events WHERE `+filter+` GROUP BY auth_index`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("Read credential usage: %w", err)
@@ -54,7 +54,7 @@ func (d *DB) credentialUsageStats(filter string, args []any) (map[string]billing
 		var authIndex string
 		var usage billing.CredentialUsage
 		if err := rows.Scan(&authIndex, &usage.Stats.Requests, &usage.Stats.Failed,
-			&usage.Stats.InputTokens, &usage.Stats.CacheReadTokens, &usage.Stats.OutputTokens); err != nil {
+			&usage.Stats.InputTokens, &usage.Stats.CacheReadTokens, &usage.Stats.OutputTokens, &usage.Stats.CostUSD); err != nil {
 			return nil, fmt.Errorf("Read credential usage: %w", err)
 		}
 		result[authIndex] = usage
