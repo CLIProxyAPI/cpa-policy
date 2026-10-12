@@ -368,6 +368,7 @@ AUTH_FILES = [
         "disabled": False,
         "unavailable": False,
         "priority": 10,
+        "weight": 10,
         "quota_supported": True,
     },
     {
@@ -388,6 +389,7 @@ AUTH_FILES = [
         "disabled": False,
         "unavailable": False,
         "priority": 99,
+        "weight": 1000000,
         "quota_supported": True,
     },
     {
@@ -398,6 +400,7 @@ AUTH_FILES = [
         "disabled": False,
         "unavailable": False,
         "priority": 5,
+        "weight": 5,
         "quota_supported": True,
     },
     {
@@ -408,6 +411,7 @@ AUTH_FILES = [
         "disabled": False,
         "unavailable": True,
         "priority": 0,
+        "weight": 0,
         "quota_supported": True,
     },
     {
@@ -449,13 +453,14 @@ def auth_file_views(files, query, scope=""):
     views = []
     for index, item in enumerate(files):
         rows = [entry for entry in entries if entry["auth_index"] == item["auth_index"]]
-        view = {**item, "usage": {
+        view = {field: value for field, value in item.items() if field != "weight"}
+        view["usage"] = {
             "requests": len(rows), "failed": sum(bool(row.get("failed")) for row in rows),
             "input_tokens": sum(sum(row["cost"].get(field, 0) for field in
                                     ("uncached_input_tokens", "cache_read_tokens", "cache_write_tokens")) for row in rows),
             "cache_read_tokens": sum(row["cost"].get("cache_read_tokens", 0) for row in rows),
             "output_tokens": sum(row["cost"].get("billed_output_tokens", 0) for row in rows),
-        }}
+        }
         if item["category"] in ("codex", "claude"):
             quota = auth_file_quota({"auth_index": [item["auth_index"]]})
             observed_at = iso(NOW - timedelta(minutes=6 + index))
@@ -1400,6 +1405,9 @@ def payload_for(path, query):
                    and (not before or entry["id"] < before)]
         return {"entries": entries[:limit], "level_counts": counts,
                 "next_before_id": entries[limit - 1]["id"] if len(entries) > limit else 0}
+    if path == "/v0/management/auth-files":
+        return {"files": [{field: item[field] for field in ("auth_index", "weight") if field in item}
+                          for item in AUTH_FILES]}
     if path == f"{API_BASE}/auth-files":
         return {"files": auth_file_views(AUTH_FILES, query)}
     if path == f"{API_BASE}/auth-files/quota":

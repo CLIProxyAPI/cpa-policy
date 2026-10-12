@@ -15,6 +15,7 @@
   "ui.request_events": "请求事件",
   "ui.error_events": "错误事件",
   "ui.auth_files": "认证文件",
+  "ui.auth_file_routing": "优先级：{priority} · 权重：{weight}",
   "ui.settings": "设置",
   "ui.filter_by_api_key": "按 API Key 筛选",
   "ui.all_api_keys": "全部 API Key",

@@ -21,6 +21,17 @@ function el(tag, attrs, ...children) {
   return node;
 }
 
+function metricTag(metrics, title) {
+  return el(
+    "span",
+    { class: "tag plain metrics", title, "aria-label": title },
+    metrics.flatMap(([label, value], index) => [
+      index > 0 && el("span", { class: "tag-separator", text: DISPLAY_SEPARATOR, "aria-hidden": "true" }),
+      el("span", { class: "tag-metric" }, el("span", { class: "tag-label", text: label }), el("span", { class: "tag-value", text: value }))
+    ])
+  );
+}
+
 // Replace a display collection while retaining its scroll position.
 // Paged lists also use the returned row container to append new entries.
 function renderCollection(target, items, { render, headers, attrs, empty = m("ui.no_data") }) {

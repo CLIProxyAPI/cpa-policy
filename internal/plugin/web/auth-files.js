@@ -38,13 +38,19 @@ function authFileQuota(file, owner) {
 
 function authQuotaRowKey(row) { return JSON.stringify([row.group_label || "", row.label_prefix || "", row.label || ""]); }
 
+function authFileRoutingTag(file) {
+  const priority = Number.isFinite(file.priority) ? file.priority : "—";
+  const weight = Number.isFinite(file.weight) ? file.weight : "—";
+  return metricTag([["P", priority], ["W", weight]], m("ui.auth_file_routing", { priority, weight }));
+}
+
 function authFileMeta(file, quota) {
   const plan = quota?.plan?.trim();
   return el(
     "div",
     { class: "auth-file-meta" },
     plan && el("span", { class: "tag " + authPlanTone(file.category, plan) }, el("span", { text: plan })),
-    el("span", { class: "tag plain", text: "P" + file.priority }),
+    authFileRoutingTag(file),
     file.unavailable && el("span", { class: "tag bad", text: m("ui.unavailable") })
   );
 }
@@ -146,14 +152,28 @@ async function activateCredentialScope(account, credential) {
   }
 }
 
+async function readAuthFileWeights() {
+  try {
+    const result = await api("GET", "/v0/management/auth-files", null, { raw: true, keepSessionOnForbidden: true });
+    return new Map(requireArray(result?.files, m("ui.auth_files")).map((file) => [file.auth_index, file.weight ?? 1]));
+  } catch (err) {
+    if (err instanceof AuthError || err instanceof StaleRequestError) throw err;
+    return new Map();
+  }
+}
+
 function readAuthFiles(account, reload = false) {
   const role = account ? "account" : "admin";
   const path = "/auth-files?" + new URLSearchParams(selectedRange(account));
   return authFilesQueries[role].read(
     JSON.stringify(sharedTimeRanges[role]),
     async () => {
-      const result = await (account ? accountAPI(path) : plugin("GET", path));
-      return requireArray(result?.files, m("ui.auth_files"));
+      const [result, weights] = await Promise.all([
+        account ? accountAPI(path) : plugin("GET", path),
+        account ? null : readAuthFileWeights()
+      ]);
+      const files = requireArray(result?.files, m("ui.auth_files"));
+      return account ? files : files.map((file) => ({ ...file, weight: weights.get(file.auth_index) }));
     },
     reload
   );

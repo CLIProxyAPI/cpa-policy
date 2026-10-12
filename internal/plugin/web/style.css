@@ -510,6 +510,11 @@ tbody tr:hover { background: var(--bg-hover); }
 }
 .tag.elite, .tag.premium { font-weight: 700; }
 .tag.icon { padding: 2px 5px; }
+.tag.metrics { align-items: baseline; font-variant-numeric: tabular-nums; }
+.tag.metrics .tag-metric { display: inline-flex; align-items: baseline; gap: 2px; }
+.tag.metrics .tag-label { color: color-mix(in srgb, currentColor 65%, transparent); font-size: 10px; font-weight: 400; }
+.tag.metrics .tag-value { font-weight: 600; }
+.tag.metrics .tag-separator { color: color-mix(in srgb, currentColor 40%, transparent); }
 /* CPAMP paints <html> in plugin frames, so the backdrop lives there and the blobs layer above it. */
 :root[data-cpamp-plugin-host="true"] { background: var(--app-bg-gradient, none) fixed var(--app-bg, #eff2f7); }
 :root[data-cpamp-plugin-host="true"] body {

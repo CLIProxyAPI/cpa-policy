@@ -15,6 +15,7 @@
   "ui.request_events": "Request events",
   "ui.error_events": "Error events",
   "ui.auth_files": "Auth Files",
+  "ui.auth_file_routing": "Priority: {priority} · Weight: {weight}",
   "ui.settings": "Settings",
   "ui.filter_by_api_key": "Filter by API key",
   "ui.all_api_keys": "All API keys",
