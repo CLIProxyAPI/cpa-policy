@@ -2034,9 +2034,15 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   border-radius: 10px;
   background: color-mix(in srgb, var(--analysis-accent) 5%, var(--bg-primary));
 }
-.usage-trend-card h2 { margin-bottom: 10px; }
-.usage-trend-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-.usage-trend-legend-item {
+.analysis-trend-chart { position: relative; height: 360px; min-width: 0; }
+.analysis-card-header { margin-bottom: 12px; }
+/* Titles take the height of a control row, so they line up across cards with or without controls. */
+.analysis-card-header h2 { display: flex; align-items: center; min-height: 35px; margin: 0; }
+.analysis-card-controls { gap: 12px; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+.analysis-card-controls > .native-select { flex: 0 1 auto; }
+.analysis-card-controls select { width: 100%; }
+.analysis-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.analysis-legend-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2049,12 +2055,7 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   line-height: 1.2;
   white-space: nowrap;
 }
-.usage-trend-legend-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--legend-color); }
-.usage-trend-chart { position: relative; height: 360px; min-width: 0; }
-.usage-distribution-header { margin-bottom: 18px; }
-.usage-distribution-controls { gap: 12px; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
-.usage-distribution-controls > .native-select { flex: 0 1 auto; }
-.usage-distribution-controls select { width: 100%; }
+.analysis-legend-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--legend-color); }
 .usage-distribution-tabs { display: flex; gap: 8px; flex: 1 0 auto; }
 .usage-distribution-tabs button { flex: 1 0 auto; }
 :root .usage-distribution-tabs button.active,
@@ -2099,7 +2100,7 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   .analysis-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
-  .usage-trend-chart { height: 320px; }
+  .analysis-trend-chart { height: 320px; }
   .usage-distribution-card { min-height: 0; }
   .usage-distribution-layout { grid-template-columns: 1fr; gap: 16px; }
   .usage-distribution-chart { width: min(240px, 75vw); height: min(240px, 75vw); }
@@ -2117,18 +2118,18 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   .settings-entry-field:has(.settings-chip-list) > .settings-entry-label { max-width: none; }
 }
 @media (max-width: 520px) {
-  .usage-distribution-controls { gap: 6px; width: 100%; }
+  .analysis-card-controls { gap: 6px; width: 100%; }
   .usage-distribution-tabs { gap: 4px; --button-padding-inline: 4px; }
   .usage-distribution-tabs button { font-size: 12px; }
-  .usage-distribution-controls select { padding-left: 8px; padding-right: 26px; font-size: 12px; }
-  .usage-distribution-controls > .native-select::after { right: 6px; width: 16px; height: 16px; }
+  .analysis-card-controls select { padding-left: 8px; padding-right: 26px; font-size: 12px; }
+  .analysis-card-controls > .native-select::after { right: 6px; width: 16px; height: 16px; }
   .analysis-summary-grid { grid-template-columns: 1fr; }
   .analysis-summary-details { gap: 5px; }
   .analysis-summary-line { gap: 2px; font-size: 10px; }
   .analysis-summary-line strong { font-size: 11px; }
-  .usage-trend-legend { gap: 6px; margin-bottom: 12px; }
-  .usage-trend-legend-item { padding: 4px 8px; font-size: 10px; }
-  .usage-trend-chart { height: 280px; }
+  .analysis-legend { gap: 6px; margin-bottom: 12px; }
+  .analysis-legend-item { padding: 4px 8px; font-size: 10px; }
+  .analysis-trend-chart { height: 280px; }
   dialog { width: calc(100vw - 24px); max-width: none; padding: 16px; }
   .settings-dialog { padding: 18px; }
   .route-dialog .route-form-toolbar { grid-template-columns: 1fr; }

@@ -101,7 +101,7 @@ func TestManagementRegistrationExposesOnlyCurrentEndpoints(t *testing.T) {
 		"POST /keys/bind", "POST /keys/unbind", "POST /keys/reset",
 		"POST /keys/label", "POST /keys/concurrency", "POST /keys/sync",
 		"POST /credentials/sync",
-		"GET /analysis", "GET /events", "GET /events/keys", "GET /errors",
+		"GET /analysis", "GET /analysis/speed", "GET /events", "GET /events/keys", "GET /errors",
 		"GET /plugin-logs", "DELETE /plugin-logs", "GET /auth-files", "GET /auth-files/quota",
 		"POST /auth-files/quota/reset",
 	} {
@@ -126,7 +126,7 @@ func TestManagementRegistrationExposesOnlyCurrentEndpoints(t *testing.T) {
 
 	wantResources := map[string]bool{
 		"/ui": false, "/profile": false, "/subscription": false, "/routing": false, "/prices": false,
-		"/analysis": false, "/events": false, "/errors": false,
+		"/analysis": false, "/analysis/speed": false, "/events": false, "/errors": false,
 		"/auth-files": false, "/auth-files/quota": false, "/auth-files/quota/reset": false,
 	}
 	if len(registration.Resources) != len(wantResources) {

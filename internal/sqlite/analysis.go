@@ -204,6 +204,62 @@ func analysisSQL(query billing.RequestEventQuery, since time.Time, boundaries []
 	return statement.String(), queryArgs
 }
 
+// AnalysisSpeed reads the TPS of the selected model's requests. Quantiles need
+// every sample, so rows are bucketed here rather than aggregated in SQL.
+func (d *DB) AnalysisSpeed(query billing.RequestEventQuery, since time.Time) (billing.AnalysisSpeedView, error) {
+	points := analysisTrendPoints(query).Requests
+	view := billing.AnalysisSpeedView{Trend: make([]billing.SpeedTrendPoint, len(points))}
+	if len(points) == 0 {
+		return view, nil
+	}
+	where, args := eventFilter(requestEventSource, query, since)
+	rows, err := d.db.Query(`SELECT r.at, r.billed_output_tokens * 1000.0 / r.latency_ms`+where+`
+		AND r.failed = 0 AND r.accounting_quality = ? AND r.billed_output_tokens > 0 AND r.latency_ms > 0`,
+		append(args, string(billing.TokenAccountingComplete))...)
+	if err != nil {
+		return billing.AnalysisSpeedView{}, fmt.Errorf("Read speed analysis data: %w", err)
+	}
+	defer rows.Close()
+	var total []float64
+	buckets := make([][]float64, len(points))
+	for rows.Next() {
+		var at int64
+		var tps float64
+		if err := rows.Scan(&at, &tps); err != nil {
+			return billing.AnalysisSpeedView{}, fmt.Errorf("Read speed analysis data: %w", err)
+		}
+		index := sort.Search(len(points), func(i int) bool { return nanos(points[i].Time) > at }) - 1
+		total = append(total, tps)
+		buckets[index] = append(buckets[index], tps)
+	}
+	if err := rows.Err(); err != nil {
+		return billing.AnalysisSpeedView{}, fmt.Errorf("Read speed analysis data: %w", err)
+	}
+	view.Summary = speedStats(total)
+	for index, point := range points {
+		view.Trend[index] = billing.SpeedTrendPoint{Time: point.Time, SpeedStats: speedStats(buckets[index])}
+	}
+	return view, nil
+}
+
+func speedStats(values []float64) billing.SpeedStats {
+	if len(values) == 0 {
+		return billing.SpeedStats{}
+	}
+	slices.Sort(values)
+	quantile := func(q float64) float64 {
+		position := q * float64(len(values)-1)
+		lower := int(position)
+		if lower == len(values)-1 {
+			return values[lower]
+		}
+		return values[lower] + (values[lower+1]-values[lower])*(position-float64(lower))
+	}
+	return billing.SpeedStats{
+		Samples: len(values), P10: quantile(0.1), P25: quantile(0.25), P50: quantile(0.5), P75: quantile(0.75), P90: quantile(0.9),
+	}
+}
+
 func (d *DB) labelAnalysisKeys(keys analysisGroups) error {
 	if len(keys) == 0 {
 		return nil

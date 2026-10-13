@@ -169,6 +169,7 @@ function resetRoleControls(role) {
 function resetRoleData(role) {
   const account = role === "account";
   destroyAnalysisCharts(account);
+  speedModels[role] = "";
   if (role === "account") accountUIState = emptyAuthQuotaState();
   else {
     $("route-picker").close();
@@ -184,6 +185,7 @@ function resetRoleData(role) {
     for (const section of page.sections) section.displayed = null;
   }
   analysisQueries[role].clear();
+  speedQueries[role].clear();
   authFilesQueries[role].clear();
   if (!account) eventKeysQuery.clear();
   for (const list of Object.values(pagedLists[role])) list.reset();

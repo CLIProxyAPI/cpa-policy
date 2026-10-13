@@ -123,6 +123,7 @@ function createQuery(label, receive = (value) => value) {
 }
 
 const analysisQueries = Object.fromEntries(["admin", "account"].map((role) => [role, createQuery(m("ui.analysis"))]));
+const speedQueries = Object.fromEntries(["admin", "account"].map((role) => [role, createQuery(m("ui.speed_trend"))]));
 const authFilesQueries = Object.fromEntries(
   ["admin", "account"].map((role) => [
     role,
@@ -619,6 +620,7 @@ function loadDataGroup(account, name, reload = false) {
         if (key !== "profile") Object.assign(resource, { value: null, error: "", readAt: 0 });
       }
       analysisQueries.account.clear();
+      speedQueries.account.clear();
       authFilesQueries.account.clear();
       for (const list of Object.values(pagedLists.account)) list.reset();
       resetAuthQuotaMemory(true);
@@ -642,6 +644,7 @@ function createPages(role) {
   const data = {
     ...resources[role],
     analysis: analysisQueries[role],
+    speed: speedQueries[role],
     authFiles: authFilesQueries[role],
     eventKeys: eventKeysQuery,
     keyDirectory,
@@ -652,7 +655,7 @@ function createPages(role) {
   const result = {
     analysis: {
       timeRange: true,
-      query: data.analysis,
+      queries: [data.analysis, data.speed],
       load: (reload) => loadAnalysis(account, reload),
       renderStatus: () => renderAnalysis(account),
       sections: []
@@ -671,7 +674,7 @@ function createPages(role) {
     },
     "auth-files": {
       timeRange: true,
-      query: data.authFiles,
+      queries: [data.authFiles],
       load: (reload) => readAuthFiles(account, reload),
       sections: [section(["authFiles"], () => renderAuthFiles(account))]
     }
@@ -702,11 +705,11 @@ function createPages(role) {
   }
   for (const page of Object.values(result)) {
     if (page.list) {
-      page.query = page.list.query;
+      page.queries = [page.list.query];
       page.load = page.list.load;
       page.renderStatus = () => { if (page.list.data) page.list.renderStatus(); };
     }
-    page.sources = [...new Set([...page.sections.flatMap((section) => section.sources), ...(page.query ? [page.query] : [])])];
+    page.sources = [...new Set([...page.sections.flatMap((section) => section.sources), ...(page.queries || [])])];
     for (const editor of page.editors || []) {
       for (const name of EDITOR_RESOURCES[editor]) if (!page.sources.includes(data[name])) page.sources.push(data[name]);
     }

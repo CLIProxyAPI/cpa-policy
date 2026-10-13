@@ -115,7 +115,7 @@ func maskAPIKeyPayload(payload any) (any, bool) {
 			value.Quota[i].GroupMessage = maskMessage(value.Quota[i].GroupMessage)
 		}
 		return value, true
-	case []billing.PriceRow:
+	case []billing.PriceRow, billing.AnalysisSpeedView:
 		return value, true
 	default:
 		return payload, false

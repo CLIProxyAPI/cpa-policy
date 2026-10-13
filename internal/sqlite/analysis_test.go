@@ -205,3 +205,40 @@ func TestAnalysisFallbackLabelsDoNotMergeUserDefinedModels(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalysisSpeedMeasuresTPSOfOneModel(t *testing.T) {
+	database := openTestDB(t)
+	event := func(offset time.Duration, latency, output int64) billing.RequestEvent {
+		entry := requestEvent("scope-a", eventStart.Add(offset))
+		entry.LatencyMS, entry.Cost.BilledOutputTokens = latency, output
+		return entry
+	}
+	unmeasured := event(40*time.Minute, 1000, 300)
+	unmeasured.AccountingQuality = billing.TokenAccountingUnclassified
+	otherModel := event(12*time.Minute, 100, 900)
+	otherModel.BillingModel = "gpt-5.6-luna"
+	failed := event(15*time.Minute, 1000, 100)
+	failed.Failed = true
+	mustSave(t, database, billing.NewState(), billing.Changes{
+		NormalRequestEvents: []billing.RequestEvent{
+			event(10*time.Minute, 1000, 100), event(20*time.Minute, 2000, 100), event(30*time.Minute, 4000, 100),
+			event(45*time.Minute, 1000, 0), event(70*time.Minute, 2000, 100), unmeasured, otherModel,
+		},
+		RequestErrorEvents: []billing.RequestErrorEvent{{Event: failed, Error: billing.RequestError{StatusCode: 502}}},
+	})
+
+	view, err := database.AnalysisSpeed(billing.RequestEventQuery{
+		Model: "gpt-5.5", From: eventStart, To: eventStart.Add(2 * time.Hour),
+	}, eventStart.Add(-billing.RequestEventRetention))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Trend) != 2 || !view.Trend[1].Time.Equal(eventStart.Add(time.Hour)) ||
+		view.Trend[0].SpeedStats != (billing.SpeedStats{Samples: 3, P10: 30, P25: 37.5, P50: 50, P75: 75, P90: 90}) ||
+		view.Trend[1].Samples != 1 || view.Trend[1].P50 != 50 {
+		t.Fatalf("speed trend = %+v", view.Trend)
+	}
+	if view.Summary.Samples != 4 || view.Summary.P50 != 50 {
+		t.Fatalf("summary = %+v", view.Summary)
+	}
+}

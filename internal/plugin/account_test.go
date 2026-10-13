@@ -225,6 +225,33 @@ func TestAccountAnalysisCannotCrossScopesOrExposeScope(t *testing.T) {
 	}
 }
 
+func TestAccountAnalysisSpeedStaysInTheCallerScope(t *testing.T) {
+	app := newAppWithPrice(t, true)
+	if _, errSync := app.store.SyncKeys([]string{accountTestKeyA, accountTestKeyB}, false); errSync != nil {
+		t.Fatal(errSync)
+	}
+	for key, latency := range map[string]time.Duration{accountTestKeyA: time.Second, accountTestKeyB: 4 * time.Second} {
+		publishUsageRecord(t, app, UsageRecord{
+			Provider: "openai", ExecutorType: "OpenAICompatExecutor", Model: "gpt-5.5", Alias: "gpt-5.5",
+			APIKey: key, Generate: true, RequestedAt: app.store.Now(), Latency: latency,
+			Detail: UsageDetail{OutputTokens: 100, TotalTokens: 100},
+		})
+	}
+	response := callAccount(t, app, routeAnalysisSpeed, accountTestKeyA, url.Values{
+		"api_key": {billing.CallerScope(accountTestKeyB)}, "model": {"gpt-5.5"},
+	})
+	var view billing.AnalysisSpeedView
+	if err := json.Unmarshal(response.Body, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Summary.Samples != 1 || view.Summary.P50 != 100 {
+		t.Fatalf("speed = %+v", view.Summary)
+	}
+	if response = callAccount(t, app, routeAnalysisSpeed, accountTestKeyA, nil); response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("speed without a model status = %d, want 400", response.StatusCode)
+	}
+}
+
 func TestAccountRequestEventsUseTheAdministratorSource(t *testing.T) {
 	app := newAppWithPrice(t, true)
 	if _, errSync := app.store.SyncKeys([]string{accountTestKeyA}, false); errSync != nil {

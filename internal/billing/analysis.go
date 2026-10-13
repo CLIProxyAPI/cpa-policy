@@ -62,16 +62,30 @@ type AnalysisView struct {
 	UsageDistribution UsageDistribution `json:"usage_distribution"`
 }
 
+// SpeedStats summarizes TPS as the request list measures it: output tokens of
+// successful, fully accounted requests over total latency. Interpolated
+// quantiles are zero without samples.
+type SpeedStats struct {
+	Samples int     `json:"samples"`
+	P10     float64 `json:"p10"`
+	P25     float64 `json:"p25"`
+	P50     float64 `json:"p50"`
+	P75     float64 `json:"p75"`
+	P90     float64 `json:"p90"`
+}
+
+type SpeedTrendPoint struct {
+	Time time.Time `json:"time"`
+	SpeedStats
+}
+
+type AnalysisSpeedView struct {
+	Summary SpeedStats        `json:"summary"`
+	Trend   []SpeedTrendPoint `json:"trend"`
+}
+
 func (s *Store) Analysis(query RequestEventQuery) (AnalysisView, error) {
-	now := s.Now()
-	from, to, err := usageTimeRange(query.From, query.To, now)
-	if err != nil {
-		return AnalysisView{}, err
-	}
-	query.From, query.To = from, to
-	view, err := withRepository(s, func(repo Repository) (AnalysisView, error) {
-		return repo.Analysis(query, now.Add(-RequestEventRetention))
-	})
+	view, err := readAnalysis(s, query, Repository.Analysis)
 	if view.UsageDistribution.APIKeys == nil {
 		view.UsageDistribution.APIKeys = []AnalysisComposition{}
 	}
@@ -82,4 +96,25 @@ func (s *Store) Analysis(query RequestEventQuery) (AnalysisView, error) {
 		view.UsageDistribution.Sources = []AnalysisComposition{}
 	}
 	return view, err
+}
+
+func (s *Store) AnalysisSpeed(query RequestEventQuery) (AnalysisSpeedView, error) {
+	view, err := readAnalysis(s, query, Repository.AnalysisSpeed)
+	if view.Trend == nil {
+		view.Trend = []SpeedTrendPoint{}
+	}
+	return view, err
+}
+
+func readAnalysis[T any](s *Store, query RequestEventQuery, read func(Repository, RequestEventQuery, time.Time) (T, error)) (T, error) {
+	now := s.Now()
+	from, to, err := usageTimeRange(query.From, query.To, now)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	query.From, query.To = from, to
+	return withRepository(s, func(repo Repository) (T, error) {
+		return read(repo, query, now.Add(-RequestEventRetention))
+	})
 }

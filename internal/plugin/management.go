@@ -40,6 +40,7 @@ const (
 	routeEventKeys              = "/events/keys"
 	routeErrors                 = "/errors"
 	routeAnalysis               = "/analysis"
+	routeAnalysisSpeed          = "/analysis/speed"
 	routePluginLogs             = "/plugin-logs"
 	routeAuthFiles              = "/auth-files"
 	routeAuthQuota              = "/auth-files/quota"
@@ -90,6 +91,9 @@ var managementEndpoints = []managementEndpoint{
 		return a.listRequestErrors(req, viewAccess{})
 	}},
 	{http.MethodGet, routeAnalysis, "View usage distribution", func(a *App, req ManagementRequest) ManagementResponse { return a.analysis(req, viewAccess{}) }},
+	{http.MethodGet, routeAnalysisSpeed, "View model speed trends", func(a *App, req ManagementRequest) ManagementResponse {
+		return a.analysisSpeed(req, viewAccess{})
+	}},
 	{http.MethodGet, routePluginLogs, "List plugin logs with pagination", (*App).listPluginLogs},
 	{http.MethodDelete, routePluginLogs, "Clear plugin logs", func(a *App, _ ManagementRequest) ManagementResponse { return a.clearPluginLogs() }},
 	{http.MethodGet, routeAuthFiles, "View auth files", func(a *App, req ManagementRequest) ManagementResponse { return a.authFiles(req, viewAccess{}) }},
@@ -114,6 +118,7 @@ var resourceEndpoints = []resourceEndpoint{
 	}},
 	{routePrices, (*App).listPrices},
 	{routeAnalysis, (*App).analysis},
+	{routeAnalysisSpeed, (*App).analysisSpeed},
 	{routeEvents, (*App).listRequestEvents},
 	{routeErrors, (*App).listRequestErrors},
 	{routeAuthFiles, (*App).authFiles},

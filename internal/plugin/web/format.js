@@ -36,6 +36,8 @@ function latency(value) {
   if (milliseconds < 1000) return Math.round(milliseconds) + " ms";
   return (milliseconds / 1000).toFixed(2) + " s";
 }
+function tokenRate(value) { return value.toFixed(1) + " t/s"; }
+function tokenRateRange(from, to) { return from.toFixed(1) + "–" + tokenRate(to); }
 function outputTPS(cost, latencyMS, measured) { return measured && latencyMS > 0 ? (cost.billed_output_tokens * 1000) / latencyMS : null; }
 function requestInputTokens(cost) { return cost.uncached_input_tokens + cost.cache_read_tokens + cost.cache_write_tokens; }
 function cacheReadRate(cacheRead, totalInput) {

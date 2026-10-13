@@ -222,21 +222,9 @@ func (a *App) analysis(req ManagementRequest, access viewAccess) ManagementRespo
 			},
 		})
 	}
-	query := billing.RequestEventQuery{Scope: access.Scope}
-	if !access.APIKey {
-		query.KeyScope, query.KeyScopeEmpty = keyScopeFilter(req.Query)
-	}
-	if err := timeRangeParams(req.Query, &query.From, &query.To); err != nil {
+	query, err := analysisQuery(req, access)
+	if err != nil {
 		return viewErrorResponse(access, err)
-	}
-	if name := strings.TrimSpace(req.Query.Get("timezone")); name != "" {
-		location, err := time.LoadLocation(name)
-		if err != nil {
-			return viewErrorResponse(access, &billing.Error{
-				Kind: billing.KindInvalid, Msg: "Timezone must be a valid IANA identifier",
-			})
-		}
-		query.Timezone = location
 	}
 	view, err := a.store.Analysis(query)
 	if err != nil {
@@ -246,6 +234,42 @@ func (a *App) analysis(req ManagementRequest, access viewAccess) ManagementRespo
 		view.UsageDistribution.APIKeys = []billing.AnalysisComposition{}
 	}
 	return viewJSON(access, http.StatusOK, view)
+}
+
+func (a *App) analysisSpeed(req ManagementRequest, access viewAccess) ManagementResponse {
+	if access.APIKey && !access.Tracked {
+		return viewJSON(access, http.StatusOK, billing.AnalysisSpeedView{Trend: []billing.SpeedTrendPoint{}})
+	}
+	query, err := analysisQuery(req, access)
+	if err != nil {
+		return viewErrorResponse(access, err)
+	}
+	if query.Model = strings.TrimSpace(req.Query.Get("model")); query.Model == "" {
+		return viewErrorResponse(access, &billing.Error{Kind: billing.KindInvalid, Msg: "Model ID is required"})
+	}
+	view, err := a.store.AnalysisSpeed(query)
+	if err != nil {
+		return viewErrorResponse(access, err)
+	}
+	return viewJSON(access, http.StatusOK, view)
+}
+
+func analysisQuery(req ManagementRequest, access viewAccess) (billing.RequestEventQuery, error) {
+	query := billing.RequestEventQuery{Scope: access.Scope}
+	if !access.APIKey {
+		query.KeyScope, query.KeyScopeEmpty = keyScopeFilter(req.Query)
+	}
+	if err := timeRangeParams(req.Query, &query.From, &query.To); err != nil {
+		return query, err
+	}
+	if name := strings.TrimSpace(req.Query.Get("timezone")); name != "" {
+		location, err := time.LoadLocation(name)
+		if err != nil {
+			return query, &billing.Error{Kind: billing.KindInvalid, Msg: "Timezone must be a valid IANA identifier"}
+		}
+		query.Timezone = location
+	}
+	return query, nil
 }
 
 func keyScopeFilter(values url.Values) (string, bool) {

@@ -166,6 +166,10 @@ func (r *memoryRepository) Analysis(query RequestEventQuery, since time.Time) (A
 	return AnalysisView{}, nil
 }
 
+func (r *memoryRepository) AnalysisSpeed(query RequestEventQuery, since time.Time) (AnalysisSpeedView, error) {
+	return AnalysisSpeedView{}, nil
+}
+
 func (r *memoryRepository) Close() error { return r.closeFail }
 
 func newStore(t *testing.T) *Store {

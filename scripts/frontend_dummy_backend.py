@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+import bisect
 import hashlib
 import json
+import math
 import random
 import re
 import time
@@ -1095,9 +1097,13 @@ def seed_paginated_history():
     for batch in range(40):
         for index, sample in enumerate(event_samples):
             sequence = batch * len(event_samples) + index
+            # Upstream load drifts slowly, giving speed trends some shape.
+            load = 1 + 0.3 * math.sin(sequence / 90)
             identity = {
                 "id": str(sequence + 1),
                 "at": iso(NOW - timedelta(minutes=sequence)),
+                "latency_ms": round(sample["latency_ms"] * load),
+                "ttft_ms": round(sample["ttft_ms"] * load),
             }
             REQUEST_EVENTS.append({**sample, **identity})
             if sample["id"] in error_samples:
@@ -1172,11 +1178,40 @@ def error_view(query, scope=""):
     return result
 
 
-def analysis_view(query, scope=""):
+def analysis_rows(query, scope):
     rows = filter_event_time([entry for entry in REQUEST_EVENTS if not scope or entry["scope"] == scope], query)
     selected = selected_scope(query, scope)
-    if selected is not None:
-        rows = [entry for entry in rows if entry["scope"] == selected]
+    return rows if selected is None else [entry for entry in rows if entry["scope"] == selected]
+
+
+# Hourly ranges start at "from"; longer ranges use browser-local days.
+def trend_starts(query):
+    from_time = datetime.fromisoformat(
+        query.get("from", [iso(NOW - timedelta(days=30))])[0].replace("Z", "+00:00")
+    )
+    to_time = datetime.fromisoformat(
+        query.get("to", [iso(NOW)])[0].replace("Z", "+00:00")
+    )
+    bucket_size = timedelta(hours=1)
+    cursor = from_time
+    if to_time - from_time > timedelta(days=1):
+        bucket_size = timedelta(days=1)
+        local_from = from_time.astimezone(ZoneInfo(query.get("timezone", ["UTC"])[0]))
+        cursor = local_from.replace(hour=0, minute=0, second=0, microsecond=0)
+    starts = []
+    while cursor < to_time:
+        starts.append(cursor)
+        cursor += bucket_size
+    return starts
+
+
+def trend_index(starts, entry):
+    return bisect.bisect_right(starts, datetime.fromisoformat(entry["at"].replace("Z", "+00:00"))) - 1
+
+
+def analysis_view(query, scope=""):
+    rows = analysis_rows(query, scope)
+    selected = selected_scope(query, scope)
 
     def distribution(field, label_field=None, unknown="未知"):
         grouped = {}
@@ -1223,36 +1258,15 @@ def analysis_view(query, scope=""):
         "input_usd", "cache_read_usd", "cache_write_usd", "output_usd"
     ))
 
-    from_time = datetime.fromisoformat(
-        query.get("from", [iso(NOW - timedelta(days=30))])[0].replace("Z", "+00:00")
-    )
-    to_time = datetime.fromisoformat(
-        query.get("to", [iso(NOW)])[0].replace("Z", "+00:00")
-    )
-    bucket_size = timedelta(hours=1)
-    bucket_start = from_time
-    if to_time - from_time > timedelta(days=1):
-        bucket_size = timedelta(days=1)
-        browser_zone = ZoneInfo(query.get("timezone", ["UTC"])[0])
-        local_from = from_time.astimezone(browser_zone)
-        bucket_start = local_from.replace(hour=0, minute=0, second=0, microsecond=0)
-    buckets = []
-    cursor = bucket_start
-    while cursor < to_time:
-        buckets.append({"time": cursor, "requests": 0,
-                        "input_tokens": 0, "output_tokens": 0,
-                        "cache_read_tokens": 0, "cache_write_tokens": 0,
-                        "total_cost": 0})
-        cursor += bucket_size
+    starts = trend_starts(query)
+    buckets = [{"time": start, "requests": 0,
+                "input_tokens": 0, "output_tokens": 0,
+                "cache_read_tokens": 0, "cache_write_tokens": 0,
+                "total_cost": 0} for start in starts]
     for entry in rows:
-        at = datetime.fromisoformat(entry["at"].replace("Z", "+00:00"))
-        if at < bucket_start or not buckets:
+        index = trend_index(starts, entry)
+        if index < 0:
             continue
-        index = len(buckets) - 1
-        for candidate in range(1, len(buckets)):
-            if at < buckets[candidate]["time"]:
-                index = candidate - 1
-                break
         item = buckets[index]
         item["requests"] += 1
         entry_cost = entry.get("cost", {})
@@ -1300,6 +1314,42 @@ def analysis_view(query, scope=""):
             "models": distribution("billing_model", unknown="未知模型"),
             "sources": distribution("source", unknown="未知来源"),
         },
+    }
+
+
+def speed_stats(values):
+    if not values:
+        return {"samples": 0, "p10": 0, "p25": 0, "p50": 0, "p75": 0, "p90": 0}
+    values = sorted(values)
+
+    def quantile(q):
+        position = q * (len(values) - 1)
+        lower = int(position)
+        if lower == len(values) - 1:
+            return values[lower]
+        return values[lower] + (values[lower + 1] - values[lower]) * (position - lower)
+
+    return {"samples": len(values), "p10": quantile(0.1), "p25": quantile(0.25), "p50": quantile(0.5),
+            "p75": quantile(0.75), "p90": quantile(0.9)}
+
+
+def analysis_speed_view(query, scope=""):
+    model = query.get("model", [""])[0].strip()
+    rows = [entry for entry in analysis_rows(query, scope)
+            if entry["billing_model"] == model and not entry["failed"] and entry["accounting_quality"] == "complete"
+            and entry["cost"]["billed_output_tokens"] > 0 and entry["latency_ms"] > 0]
+    starts = trend_starts(query)
+    buckets = [[] for _ in starts]
+    total = []
+    for entry in rows:
+        tps = entry["cost"]["billed_output_tokens"] * 1000 / entry["latency_ms"]
+        total.append(tps)
+        index = trend_index(starts, entry)
+        if index >= 0:
+            buckets[index].append(tps)
+    return {
+        "summary": speed_stats(total),
+        "trend": [{"time": iso(start), **speed_stats(bucket)} for start, bucket in zip(starts, buckets)],
     }
 
 
@@ -1395,6 +1445,8 @@ def payload_for(path, query):
         return error_view(query)
     if path == f"{API_BASE}/analysis":
         return analysis_view(query)
+    if path == f"{API_BASE}/analysis/speed":
+        return analysis_speed_view(query)
     if path == f"{API_BASE}/plugin-logs":
         counts = {level: sum(entry["level"] == level for entry in PLUGIN_LOGS)
                   for level in ("debug", "info", "error")}
@@ -1533,6 +1585,7 @@ class Handler(BaseHTTPRequestHandler):
             f"{RESOURCE_BASE}/events",
             f"{RESOURCE_BASE}/errors",
             f"{RESOURCE_BASE}/analysis",
+            f"{RESOURCE_BASE}/analysis/speed",
             f"{RESOURCE_BASE}/auth-files",
             f"{RESOURCE_BASE}/auth-files/quota",
             f"{RESOURCE_BASE}/auth-files/quota/reset",
@@ -1556,6 +1609,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, model_prices(parse_qs(parsed.query), include_custom=False))
             elif parsed.path.endswith("/analysis"):
                 self.send_json(200, analysis_view(parse_qs(parsed.query), LIVE_KEYS[index]["scope"]))
+            elif parsed.path.endswith("/analysis/speed"):
+                self.send_json(200, analysis_speed_view(parse_qs(parsed.query), LIVE_KEYS[index]["scope"]))
             elif parsed.path.endswith("/errors"):
                 self.send_json(200, error_view(parse_qs(parsed.query), LIVE_KEYS[index]["scope"]))
             elif parsed.path.endswith("/auth-files"):

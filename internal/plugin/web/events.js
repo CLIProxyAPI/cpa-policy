@@ -289,7 +289,7 @@ function renderRequestEvents(account = false) {
       el(
         "td",
         { class: "num" },
-        el("div", {}, tps === null ? "—" : tps.toFixed(1) + " t/s"),
+        el("div", {}, tps === null ? "—" : tokenRate(tps)),
         el(
           "div",
           {
