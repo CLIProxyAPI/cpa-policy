@@ -238,10 +238,13 @@ function quotaAmount(row) {
   const hasUsed = row.used !== undefined;
   const hasLimit = row.limit !== undefined;
   if (!hasUsed && !hasLimit) return "";
-  const money = row.currency === "USD";
-  const format = (value) => (money ? usd(value) : value.toLocaleString(locale(), { maximumFractionDigits: 2 }));
+  const format = (value) => quotaNumber(value, row.currency);
   if (hasUsed && hasLimit) return format(row.used) + DISPLAY_SLASH + format(row.limit);
   return hasUsed ? m("ui.used_value", { v0: format(row.used) }) : m("ui.quota_value", { v0: format(row.limit) });
+}
+
+function quotaNumber(value, currency) {
+  return currency === "USD" ? usd(value) : Number(value).toLocaleString(locale(), { maximumFractionDigits: 2 });
 }
 
 function quotaLabel(row) {
@@ -348,7 +351,7 @@ function renderAuthFileQuota(file, account) {
   const summary = [];
   const balance = Number(result.credit_balance);
   if (result.credits_unlimited || (Number.isFinite(balance) && balance !== 0)) {
-    const credits = result.credits_unlimited ? m("ui.unlimited") : result.credit_currency === "USD" ? usd(balance) : result.credit_balance;
+    const credits = result.credits_unlimited ? m("ui.unlimited") : quotaNumber(balance, result.credit_currency);
     summary.push(el("span", { text: m("ui.credits_value", { v0: credits }) }));
   }
   if (Number.isFinite(result.rate_limit_reset_credits_available_count)) {

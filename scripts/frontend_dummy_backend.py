@@ -494,7 +494,7 @@ def quota_row(label, remaining_percent, reset_seconds, **extra):
 AUTH_FILE_QUOTAS = {
     "auth-demo-codex-pro": {
         "plan": "Pro 200",
-        "credit_balance": "126.4",
+        "credit_balance": "62500.0000000000",
         "rate_limit_reset_credits_available_count": 2,
         "rate_limit_reset_credits": [
             {"expires_at": iso(NOW + timedelta(days=13, hours=14))},
