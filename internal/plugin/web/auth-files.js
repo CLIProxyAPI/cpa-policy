@@ -298,6 +298,9 @@ function renderQuotaRow(row) {
 
 function renderAuthResetCredits(file, result) {
   if (file.category !== "codex") return null;
+  if (result.rate_limit_reset_credits_available_count === 0) {
+    return el("div", { class: "muted small", text: m("ui.no_manual_resets_available") });
+  }
   const credits = result.rate_limit_reset_credits || [];
   if (!credits.length) { return el("div", { class: "muted small", text: m("ui.reset_credits_expiry_unavailable") }); }
   const timezone =

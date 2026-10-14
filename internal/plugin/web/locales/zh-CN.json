@@ -257,6 +257,7 @@
   "ui.reset_credits_expiry": "主动重置过期时间（{v0}）",
   "ui.reset_credit_number": "第 {v0} 次",
   "ui.reset_credits_expiry_unavailable": "暂时无法获取主动重置过期时间",
+  "ui.no_manual_resets_available": "暂无可用主动重置次数",
   "ui.the_upstream_returned_no_displayable_quota": "上游未返回可展示的额度",
   "ui.no_auth_files_match_the_filters": "没有符合筛选条件的认证文件",
   "ui.disabled": "已停用",

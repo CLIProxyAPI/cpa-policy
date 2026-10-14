@@ -257,6 +257,7 @@
   "ui.reset_credits_expiry": "Manual reset expiry ({v0})",
   "ui.reset_credit_number": "Reset {v0}",
   "ui.reset_credits_expiry_unavailable": "Manual reset expiry unavailable",
+  "ui.no_manual_resets_available": "No manual resets available",
   "ui.the_upstream_returned_no_displayable_quota": "The upstream returned no displayable quota",
   "ui.no_auth_files_match_the_filters": "No auth files match the filters",
   "ui.disabled": "Disabled",
