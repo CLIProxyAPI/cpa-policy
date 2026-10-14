@@ -56,6 +56,19 @@ func inferredFailureType(body string) string {
 		return "context_canceled"
 	case strings.Contains(body, "rate limit exceeded"):
 		return "rate_limit_exceeded"
+	case strings.Contains(body, "stream disconnected before completion") ||
+		strings.Contains(body, "websocket: close ") ||
+		strings.Contains(body, "use of closed network connection") ||
+		strings.Contains(body, "upstream connect error or disconnect/reset before headers") ||
+		strings.Contains(body, "context deadline exceeded") ||
+		strings.Contains(body, "tls handshake") ||
+		strings.Contains(body, "read tcp ") || strings.Contains(body, "write tcp ") ||
+		strings.Contains(body, "dial tcp ") || strings.Contains(body, "dial udp ") ||
+		strings.Contains(body, "connection reset by peer") || strings.Contains(body, "connection refused") ||
+		strings.Contains(body, "broken pipe") || strings.Contains(body, "network is unreachable") ||
+		strings.Contains(body, "no route to host") || strings.Contains(body, "no such host") ||
+		strings.Contains(body, "protocol_error; received from peer"):
+		return "network_error"
 	default:
 		return ""
 	}
