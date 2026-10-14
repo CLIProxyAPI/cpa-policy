@@ -27,6 +27,8 @@ function authFileQuota(file, owner) {
   if (!observed) return manual;
   const rows = new Map(manual.quota.map((row) => [authQuotaRowKey(row), row]));
   for (const row of observed.quota) {
+    // A manual query is a complete snapshot, including windows that no longer exist.
+    if (!(new Date(row.observed_at) > new Date(manual.fetched_at))) continue;
     const previous = rows.get(authQuotaRowKey(row));
     if (!previous || new Date(row.observed_at) > new Date(previous.observed_at || manual.fetched_at)) rows.set(authQuotaRowKey(row), row);
   }
