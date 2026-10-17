@@ -5,27 +5,41 @@ import (
 	"time"
 )
 
+// ExecutionMetadata contains host-reported execution identity. CredentialRef is
+// a plugin fingerprint, and BaseURL omits user info, query strings and fragments.
+type ExecutionMetadata struct {
+	RequestID       string `json:"request_id,omitempty"`
+	TraceID         string `json:"trace_id,omitempty"`
+	SessionID       string `json:"session_id,omitempty"`
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	CredentialRef   string `json:"credential_ref,omitempty"`
+	BaseURL         string `json:"base_url,omitempty"`
+	AccessProvider  string `json:"access_provider,omitempty"`
+	IsNativeKey     *bool  `json:"is_native_key,omitempty"`
+}
+
 // RequestEvent is one persisted request record and never stores a plaintext API key.
 // Account contains only an OAuth identity or masked API key.
 type RequestEvent struct {
-	Endpoint            string    `json:"endpoint,omitempty"`
-	Transport           string    `json:"transport,omitempty"`
-	Stream              *bool     `json:"stream,omitempty"`
-	At                  time.Time `json:"at"`
-	Scope               string    `json:"scope"`
-	AuthIndex           string    `json:"auth_index,omitempty"`
-	Provider            string    `json:"provider,omitempty"`
-	Account             string    `json:"account,omitempty"`
-	ExecutorType        string    `json:"executor_type,omitempty"`
-	ReasoningEffort     string    `json:"reasoning_effort,omitempty"`
-	ServiceTier         string    `json:"service_tier,omitempty"`
-	ResponseServiceTier string    `json:"response_service_tier,omitempty"`
-	UpstreamModel       string    `json:"upstream_model,omitempty"`
-	ResponseModel       string    `json:"response_model,omitempty"`
-	BillingModel        string    `json:"billing_model,omitempty"`
-	Failed              bool      `json:"failed"`
-	LatencyMS           int64     `json:"latency_ms,omitempty"`
-	TTFTMS              int64     `json:"ttft_ms,omitempty"`
+	Execution           *ExecutionMetadata `json:"execution,omitempty"`
+	Endpoint            string             `json:"endpoint,omitempty"`
+	Transport           string             `json:"transport,omitempty"`
+	Stream              *bool              `json:"stream,omitempty"`
+	At                  time.Time          `json:"at"`
+	Scope               string             `json:"scope"`
+	AuthIndex           string             `json:"auth_index,omitempty"`
+	Provider            string             `json:"provider,omitempty"`
+	Account             string             `json:"account,omitempty"`
+	ExecutorType        string             `json:"executor_type,omitempty"`
+	ReasoningEffort     string             `json:"reasoning_effort,omitempty"`
+	ServiceTier         string             `json:"service_tier,omitempty"`
+	ResponseServiceTier string             `json:"response_service_tier,omitempty"`
+	UpstreamModel       string             `json:"upstream_model,omitempty"`
+	ResponseModel       string             `json:"response_model,omitempty"`
+	BillingModel        string             `json:"billing_model,omitempty"`
+	Failed              bool               `json:"failed"`
+	LatencyMS           int64              `json:"latency_ms,omitempty"`
+	TTFTMS              int64              `json:"ttft_ms,omitempty"`
 	// AccountingQuality is empty when the host reported no token detail.
 	AccountingQuality TokenAccountingQuality `json:"accounting_quality,omitempty"`
 	// PriceSource says where the numbers came from. "none" means no rule

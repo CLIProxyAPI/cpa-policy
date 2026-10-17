@@ -2,7 +2,9 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -367,7 +369,7 @@ func TestPhysicalAPIKeyCredentialCannotReachUpstream(t *testing.T) {
 		}
 		return json.RawMessage(`{"auth_index":"xai-1","json":{"api_key":"dummy-paid-key"}}`), nil
 	})
-	_, errFetch := app.fetchAuthQuota("", hostAuthFile{AuthIndex: "xai-1"}, "xai")
+	_, errFetch := app.fetchAuthQuota("", hostAuthFile{AuthIndex: "xai-1", Type: "xai"})
 	if errFetch == nil || errFetch.Error() != "API key credentials do not support this quota query" {
 		t.Fatalf("error = %v", errFetch)
 	}
@@ -663,7 +665,7 @@ func TestAntigravityQuotaReadsNestedCredentialFields(t *testing.T) {
 			return nil, nil
 		}
 	})
-	result, errFetch := app.fetchAuthQuota("", hostAuthFile{AuthIndex: "ag-1"}, "antigravity")
+	result, errFetch := app.fetchAuthQuota("", hostAuthFile{AuthIndex: "ag-1", Type: "antigravity"})
 	if errFetch != nil {
 		t.Fatal(errFetch)
 	}
@@ -723,7 +725,7 @@ func TestInvalidCredentialProxyFailsInsteadOfSendingHostRequest(t *testing.T) {
 		}
 		return json.RawMessage(`{"auth_index":"codex-1","json":{"access_token":"dummy-token","proxy_url":"invalid://dummy-proxy:1080"}}`), nil
 	})
-	_, errFetch := app.fetchAuthQuota("", hostAuthFile{AuthIndex: "codex-1"}, "codex")
+	_, errFetch := app.fetchAuthQuota("", hostAuthFile{AuthIndex: "codex-1", Type: "codex"})
 	if errFetch == nil || errFetch.Error() != "Invalid auth file proxy" {
 		t.Fatalf("error = %v", errFetch)
 	}
@@ -841,6 +843,8 @@ func TestAuthQuotaReset(t *testing.T) {
 			app.SetHostCaller(func(method string, payload any) (json.RawMessage, error) {
 				hostCalls++
 				switch method {
+				case hostRoutingResetCooldown:
+					return json.RawMessage(`{}`), nil
 				case hostAuthList:
 					return mustJSONRaw(t, hostAuthListResponse{Files: []hostAuthFile{file}}), nil
 				case hostAuthGet:
@@ -903,7 +907,7 @@ func TestAuthQuotaReset(t *testing.T) {
 			if (tc.want == 400 || tc.want == 401 || tc.want == 403) && hostCalls != 0 {
 				t.Fatalf("rejected request made %d host calls", hostCalls)
 			}
-			if tc.want == 200 && string(response.Body) != `{"reset":true}` {
+			if tc.want == 200 && string(response.Body) != `{"cooldown_cleared":true,"reset":true}` {
 				t.Fatalf("unexpected reset result: %s", response.Body)
 			}
 			if strings.Contains(string(response.Body), "dummy-upstream-token") {
@@ -923,4 +927,76 @@ func mustJSONRaw(t *testing.T, value any) json.RawMessage {
 		t.Fatal(errMarshal)
 	}
 	return raw
+}
+
+func TestStandardQuotaFetchAndReset(t *testing.T) {
+	quota := (authQuotaResponse{CreditBalance: "9.5", CreditCurrency: "USD", Quota: []quotaRow{
+		{Label: "Unknown"},
+		{Label: "Known usage", Used: floatPointer(25), Limit: floatPointer(100)},
+		{Label: "Invalid", RemainingPercent: floatPointer(math.Inf(1))},
+	}}).normalized()
+	if len(quota.Summary) != 1 || quota.Summary[0].Value != 9.5 || quota.Summary[0].Format != "currency" || len(quota.Groups) != 1 || len(quota.Groups[0].Buckets) != 1 || quota.Groups[0].Buckets[0].RemainingFraction != 0.75 {
+		t.Fatalf("unknown quota was fabricated or known values were lost: %+v", quota)
+	}
+	quota = (authQuotaResponse{CreditBalance: "0", CreditsUnlimited: true}).normalized()
+	if len(quota.Summary) != 0 || len(quota.Groups) != 1 || quota.Groups[0].Buckets[0].Window != "Unlimited credits" {
+		t.Fatalf("unlimited credits presented as exhausted: %+v", quota)
+	}
+	for _, cooldownFails := range []bool{false, true} {
+		app := newConfiguredApp(t)
+		upstreamCalls, cooldownCalls := 0, 0
+		app.SetHostCaller(func(method string, payload any) (json.RawMessage, error) {
+			switch method {
+			case hostAuthList:
+				return json.RawMessage(`{"files":[{"id":"dummy-auth","auth_index":"dummy-index","type":"codex","source":"file"}]}`), nil
+			case hostAuthGet:
+				return json.RawMessage(`{"json":{"access_token":"dummy-token"}}`), nil
+			case hostHTTPDo:
+				request := payload.(hostHTTPRequest)
+				if request.HostCallbackID != "dummy-callback" {
+					t.Fatal("lost callback scope")
+				}
+				upstreamCalls++
+				if request.Method == "GET" {
+					return mustJSONRaw(t, hostHTTPResponse{StatusCode: 200, Body: []byte(`{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000,"reset_at":1900000000}}}`)}), nil
+				}
+				var body map[string]string
+				if json.Unmarshal(request.Body, &body) != nil || !quotaResetIDPattern.MatchString(body["redeem_request_id"]) {
+					t.Fatal("invalid reset identity")
+				}
+				return mustJSONRaw(t, hostHTTPResponse{StatusCode: 204}), nil
+			case hostRoutingResetCooldown:
+				cooldownCalls++
+				if cooldownFails {
+					return nil, errors.New("callback unavailable")
+				}
+				return json.RawMessage(`{}`), nil
+			default:
+				t.Fatalf("unexpected host call %q", method)
+				return nil, nil
+			}
+		})
+		req := mustMarshal(t, QuotaRequest{AuthIndex: "dummy-index", AuthID: "dummy-auth", Provider: "codex", HostCallbackID: "dummy-callback"})
+		raw, err := app.HandleMethod(MethodQuotaFetch, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var quota QuotaResponse
+		decodeResult(t, raw, &quota)
+		if quota.Subscription == nil || quota.Subscription.Plan != "Plus" || len(quota.Groups) != 1 || quota.Groups[0].Buckets[0].RemainingFraction != 0.75 {
+			t.Fatalf("quota=%+v", quota)
+		}
+		raw, err = app.HandleMethod(MethodQuotaReset, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Success bool
+			Message string
+		}
+		decodeResult(t, raw, &result)
+		if !result.Success || (result.Message != "") != cooldownFails || upstreamCalls != 3 || cooldownCalls != 1 {
+			t.Fatalf("reset=%+v upstream=%d cooldown=%d", result, upstreamCalls, cooldownCalls)
+		}
+	}
 }

@@ -8,6 +8,14 @@ const EVENT_CSV_COLUMNS = {
     "billing_model",
     "upstream_model",
     "executor_type",
+    "request_id",
+    "trace_id",
+    "session_id",
+    "parent_session_id",
+    "access_provider",
+    "is_native_key",
+    "base_url",
+    "credential_ref",
     "endpoint",
     "transport",
     "stream",
@@ -29,6 +37,28 @@ const EVENT_CSV_COLUMNS = {
   ],
   errors: ["at", "preview", "label", "billing_model", "upstream_model", "source", "status_code", "error_type", "body"]
 };
+
+function renderExecutionTooltip(execution) {
+  const labels = {
+    request_id: "ui.execution_id",
+    trace_id: "ui.trace_id",
+    session_id: "ui.session_id",
+    parent_session_id: "ui.parent_session_id",
+    access_provider: "ui.access_provider",
+    is_native_key: "ui.native_key",
+    base_url: "ui.upstream_origin",
+    credential_ref: "ui.credential_reference"
+  };
+  const fields = Object.entries(labels).filter(([key]) => execution[key] != null && execution[key] !== "");
+  return fields.map(([key, label]) =>
+    el(
+      "div",
+      {},
+      el("div", { class: "hover-tooltip-heading", text: m(label) }),
+      el("div", { class: "hover-tooltip-body mono", text: String(execution[key]) })
+    )
+  );
+}
 
 function apiKeyFilter(account) {
   const key = account ? "" : $("analysis-key").value;
@@ -295,7 +325,11 @@ function renderRequestEvents(account = false) {
       el(
         "td",
         { class: "small request-event-request" },
-        el("div", { class: "request-event-cell-line mono", text: requestType }),
+        el("div", {
+          class: "request-event-cell-line mono",
+          text: requestType,
+          ...(entry.execution ? hoverTooltipProps(() => renderExecutionTooltip(entry.execution)) : {})
+        }),
         el("div", { class: "request-event-detail muted mono", text: entry.endpoint || "—" })
       ),
       el("td", {}, failureTag(entry)),
@@ -496,7 +530,9 @@ function csvCell(value) {
 }
 
 function eventCSV(entries, kind, account) {
-  const columns = EVENT_CSV_COLUMNS[kind].filter((column) => !account || !["preview", "label"].includes(column));
+  const columns = EVENT_CSV_COLUMNS[kind].filter(
+    (column) => !account || !["preview", "label", "base_url", "credential_ref"].includes(column)
+  );
   const lines = [columns.map(csvCell).join(",")];
   for (const record of entries) {
     const entry = account ? record : keyDirectory.resolve(record);
@@ -506,6 +542,7 @@ function eventCSV(entries, kind, account) {
         ? {
             ...entry,
             ...entry.cost,
+            ...entry.execution,
             multiplier: entry.cost.multiplier || 1,
             input_tokens: requestInputTokens(entry.cost),
             output_tps: outputTPS(entry.cost, entry.latency_ms, measured)

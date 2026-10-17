@@ -55,7 +55,9 @@ openai-compatibility:
       - api-key: "e2e-route-allowed-1111"
     models:
       - name: "e2e-credential-route"
+  # Issue #25: an excluded higher-priority credential must not hide an allowed one.
   - name: "route-denied-e2e"
+    priority: 10
     base-url: "__UPSTREAM_ORIGIN__/v1"
     api-key-entries:
       - api-key: "e2e-route-denied-2222"

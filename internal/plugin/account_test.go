@@ -301,6 +301,7 @@ func TestAccountEmailMasking(t *testing.T) {
 	publishUsageRecord(t, app, UsageRecord{
 		Provider: "codex", Model: "gpt-5.5", Alias: "gpt-5.5", APIKey: accountTestKeyA,
 		AuthType: "oauth", Source: "private@example.com", Failed: true,
+		SessionID: "private@example.com", ParentSessionID: "parent@example.com",
 		Failure: UsageFailure{Body: `{"error":{"message":"contact private@example.com"}}`},
 	})
 	profile := callAccount(t, app, routeProfile, accountTestKeyA, nil)
@@ -316,6 +317,7 @@ func TestAccountEmailMasking(t *testing.T) {
 		t.Fatal(errDecode)
 	}
 	if len(view.Entries) != 1 || view.Entries[0].Source != "codex · pr****e@example.com" ||
+		view.Entries[0].Execution == nil || view.Entries[0].Execution.SessionID != "pr****e@example.com" || view.Entries[0].Execution.ParentSessionID != "pa***t@example.com" ||
 		view.Filters == nil || len(view.Filters.SourceOptions) != 1 ||
 		view.Filters.SourceOptions[0].Label != "codex · pr****e@example.com" {
 		t.Fatalf("masked event view = %+v", view)

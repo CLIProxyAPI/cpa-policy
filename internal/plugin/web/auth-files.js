@@ -156,7 +156,7 @@ async function activateCredentialScope(account, credential) {
 
 async function readAuthFileWeights() {
   try {
-    const result = await api("GET", "/v0/management/auth-files", null, { raw: true, keepSessionOnForbidden: true });
+    const result = await api("GET", "/v0/management/auth-files", null, { keepSessionOnForbidden: true });
     return new Map(requireArray(result?.files, m("ui.auth_files")).map((file) => [file.auth_index, file.weight ?? 1]));
   } catch (err) {
     if (err instanceof AuthError || err instanceof StaleRequestError) throw err;
@@ -554,7 +554,7 @@ async function setAuthFileEnabled(file, enabled) {
   renderAuthFiles(false);
   try {
     const body = { name: file.name, auth_index: file.auth_index, disabled: !enabled };
-    await api("PATCH", "/v0/management/auth-files/status", body, { raw: true });
+    await api("PATCH", "/v0/management/auth-files/status", body);
   } catch (error) {
     owner.authStatusSubmissions.delete(file.auth_index);
     file.disabled = enabled;
@@ -614,7 +614,7 @@ async function resetAuthQuota(file, account) {
       owner.authQuotaErrors.delete(index);
       persistAuthQuotaCache(account);
       renderAuthFiles(account);
-      let resetConfirmed = false;
+      let resetConfirmed = false, cooldownCleared = true;
       try {
         const params = new URLSearchParams({ auth_index: file.auth_index, auth_name: file.name, auth_revision: file.cache_revision || "" });
         const path = "/auth-files/quota/reset?" + params;
@@ -630,6 +630,7 @@ async function resetAuthQuota(file, account) {
         const result = account ? await accountAPI(path, opts) : await plugin("POST", path, null, opts);
         if (result?.reset !== true) throw new UIError(m("ui.reset_was_not_confirmed_update_the_quota_to_check_its_current_status"));
         resetConfirmed = true;
+        cooldownCleared = result.cooldown_cleared === true;
       } finally {
         if (authQuotaCacheCurrent(account, owner, generation, index)) {
           owner.authQuotaLoading.delete(index);
@@ -642,6 +643,10 @@ async function resetAuthQuota(file, account) {
       await refreshAuthQuota(file, account);
       if (authQuotaCacheCurrent(account, owner, generation, index)) {
         const failed = owner.authQuotaErrors.has(index);
+        if (!cooldownCleared) {
+          notify(m("ui.quota_reset_but_cooldown_clear_failed"), "err");
+          return;
+        }
         notify(
           failed
             ? m("ui.quota_reset_but_refresh_failed_please_update_the_quota_manually")

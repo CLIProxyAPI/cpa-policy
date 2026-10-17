@@ -434,7 +434,7 @@ function queueAdminData(group, operation) {
 
 async function readAdminConfiguration(read) {
   // Keep plaintext configuration out of the resource cache.
-  const config = api("GET", "/v0/management/config", null, { raw: true }).then((value) => requireObject(value, m("ui.cpa_configuration")));
+  const config = api("GET", "/v0/management/config", null).then((value) => requireObject(value, m("ui.cpa_configuration")));
   const configuredKeys = config.then(parseConfiguredAPIKeys);
   const errors = [];
   const sync = async (label, operation) => {
@@ -531,12 +531,12 @@ async function fetchModelPrices(models, account) {
 }
 
 async function fetchConfiguredAPIKeys() {
-  const result = await api("GET", "/v0/management/api-keys", null, { raw: true });
+  const result = await api("GET", "/v0/management/api-keys", null);
   return parseConfiguredAPIKeys(result);
 }
 
 async function fetchModels(account, key) {
-  const result = await api("GET", "/v1/models", null, { raw: true, key, auxiliaryCredential: !account });
+  const result = await api("GET", "/v1/models", null, { key, auxiliaryCredential: !account });
   const rows = requireArray(result?.data, m("ui.cpa_model_list"));
   if (rows.some((row) => !row || typeof row.id !== "string" || !row.id.trim())) throw new UIError(m("ui.invalid_cpa_model_list"));
   const models = [...new Set(rows.map((row) => row.id))].sort(compareModelId);

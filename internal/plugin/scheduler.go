@@ -33,7 +33,7 @@ func candidateWeight(candidate SchedulerAuthCandidate) int64 {
 		return 1
 	}
 	weight, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || weight <= 0 {
+	if err != nil || weight <= 0 || weight > 1_000_000 {
 		return 0
 	}
 	return weight
@@ -52,9 +52,15 @@ func routingPoolKey(model string, decision billing.RoutingDecision) string {
 func (s *subsetScheduler) pick(scope, pool string, candidates []SchedulerAuthCandidate) string {
 	positive := make([]SchedulerAuthCandidate, 0, len(candidates))
 	weights := make(map[string]int64, len(candidates))
+	highestPriority := 0
 	for _, candidate := range candidates {
 		weight := candidateWeight(candidate)
-		if weight > 0 {
+		if weight > 0 && (len(positive) == 0 || candidate.Priority >= highestPriority) {
+			if len(positive) == 0 || candidate.Priority > highestPriority {
+				highestPriority = candidate.Priority
+				positive = positive[:0]
+				clear(weights)
+			}
 			positive = append(positive, candidate)
 			weights[candidate.ID] = weight
 		}
@@ -65,6 +71,7 @@ func (s *subsetScheduler) pick(scope, pool string, candidates []SchedulerAuthCan
 	if len(positive) == 1 {
 		return positive[0].ID
 	}
+	pool += "\x00" + strconv.Itoa(highestPriority)
 	sort.Slice(positive, func(i, j int) bool { return positive[i].ID < positive[j].ID })
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -27,7 +27,7 @@ func TestRegisterDeclaresExpectedCapabilities(t *testing.T) {
 		t.Fatalf("SchemaVersion = %d, want %d", registration.SchemaVersion, SchemaVersion)
 	}
 	caps := registration.Capabilities
-	if !caps.RequestInterceptor || !caps.RequestLifecyclePlugin || !caps.UsagePlugin || !caps.ManagementAPI || !caps.Scheduler {
+	if !caps.RequestInterceptor || !caps.RequestLifecyclePlugin || !caps.UsagePlugin || !caps.ManagementAPI || !caps.Scheduler || !caps.SchedulerAcrossPriorities || !caps.QuotaProvider {
 		t.Fatalf("capabilities = %+v, want every hook billing depends on", caps)
 	}
 	if registration.Metadata.Name != PluginName || registration.Metadata.Version != Version {
@@ -39,6 +39,9 @@ func TestRegisterDeclaresExpectedCapabilities(t *testing.T) {
 	fields := make(map[string]ConfigField, len(registration.Metadata.ConfigFields))
 	for _, field := range registration.Metadata.ConfigFields {
 		fields[field.Name] = field
+		if field.Default == nil {
+			t.Fatalf("missing default for %s", field.Name)
+		}
 	}
 	if fields["state_file"].Type != "string" || fields["debug"].Type != "boolean" ||
 		fields["codex_fast_mode_billing"].Type != "boolean" || fields["mask_api_key_view_emails"].Type != "boolean" ||

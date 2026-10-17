@@ -73,6 +73,15 @@ func maskAPIKeyPayload(payload any) (any, bool) {
 			value.Entries[i].Account = maskEmails(value.Entries[i].Account)
 			value.Entries[i].Source = maskEmails(value.Entries[i].Source)
 			value.Entries[i].ErrorBody = maskEmails(value.Entries[i].ErrorBody)
+			if execution := value.Entries[i].Execution; execution != nil {
+				masked := *execution
+				masked.RequestID = maskEmails(masked.RequestID)
+				masked.TraceID = maskEmails(masked.TraceID)
+				masked.SessionID = maskEmails(masked.SessionID)
+				masked.ParentSessionID = maskEmails(masked.ParentSessionID)
+				masked.AccessProvider = maskEmails(masked.AccessProvider)
+				value.Entries[i].Execution = &masked
+			}
 		}
 		if value.Filters != nil {
 			for i := range value.Filters.SourceOptions {

@@ -694,5 +694,14 @@
   "ui.cache_rate": "Cache rate",
   "ui.quota": "Quota",
   "ui.quota_reset_elapsed": "Reset time reached",
-  "ui.auth_request_outcomes": "Succeeded: {v0} · Failed: {v1}"
+  "ui.auth_request_outcomes": "Succeeded: {v0} · Failed: {v1}",
+  "ui.quota_reset_but_cooldown_clear_failed": "Upstream quota was reset, but the local routing cooldown could not be cleared. Clear it in CPA before retrying.",
+  "ui.execution_id": "Execution ID",
+  "ui.trace_id": "Trace ID",
+  "ui.session_id": "Session ID",
+  "ui.parent_session_id": "Parent session ID",
+  "ui.access_provider": "Access provider",
+  "ui.native_key": "Native API key",
+  "ui.upstream_origin": "Upstream origin",
+  "ui.credential_reference": "Credential reference"
 }

@@ -136,7 +136,8 @@ CREATE TABLE request_events (
 	response_headers_json       TEXT    NOT NULL DEFAULT '{}',
 	endpoint                    TEXT    NOT NULL DEFAULT '',
 	transport                   TEXT    NOT NULL DEFAULT '',
-	stream                      INTEGER
+	stream                      INTEGER,
+	execution_json              TEXT    NOT NULL DEFAULT 'null'
 );
 
 CREATE TABLE request_errors (

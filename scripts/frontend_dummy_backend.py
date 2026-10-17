@@ -788,6 +788,7 @@ def event_sample(
         "source": source,
         "provider": provider,
         "executor_type": executor,
+        "execution": {"request_id": f"dummy-execution-{key_index}-{model}", "trace_id": "demo0001", "session_id": "dummy-session", "access_provider": "config-inline", "is_native_key": True},
         "reasoning_effort": effort,
         "service_tier": tier,
         "response_service_tier": response_tier,
@@ -1681,7 +1682,7 @@ class Handler(BaseHTTPRequestHandler):
                 quota["rate_limit_reset_credits"].pop(0)
             for row in quota["quota"]:
                 row["remaining_percent"] = 100
-            self.send_json(200, {"reset": True})
+            self.send_json(200, {"reset": True, "cooldown_cleared": True})
 
     def do_PATCH(self):
         self.handle_mutation()

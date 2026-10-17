@@ -269,6 +269,7 @@ func (a *App) handleUsage(raw []byte) ([]byte, error) {
 	at := a.store.Now()
 	origin := a.findRequestOrigin(record.TraceID, scope)
 	event := billing.UsageEvent{
+		Execution:           record.executionMetadata(),
 		Endpoint:            origin.endpoint,
 		Transport:           origin.transport,
 		Stream:              record.Stream,

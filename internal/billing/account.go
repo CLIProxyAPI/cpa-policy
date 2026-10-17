@@ -7,6 +7,7 @@ import (
 )
 
 type UsageEvent struct {
+	Execution           *ExecutionMetadata
 	Endpoint            string
 	Transport           string
 	Stream              *bool
@@ -95,6 +96,7 @@ func (s *Store) recordUsage(event UsageEvent, failure *RequestError) {
 			entryAt = at
 		}
 		entry := RequestEvent{
+			Execution:           event.Execution,
 			Endpoint:            event.Endpoint,
 			Transport:           event.Transport,
 			Stream:              event.Stream,

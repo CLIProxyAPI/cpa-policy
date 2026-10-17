@@ -86,6 +86,12 @@ func (a *App) handleMethod(method string, request []byte) ([]byte, error) {
 		return a.pickCredential(request)
 	case MethodUsageHandle:
 		return a.handleUsage(request)
+	case MethodQuotaIdentifier:
+		return OKEnvelope(map[string]string{"identifier": PluginID})
+	case MethodQuotaDescribe:
+		return OKEnvelope(QuotaDescription{SupportedProviders: authQuotaProviders, DisplayName: MenuLabel, SupportsReset: true})
+	case MethodQuotaFetch, MethodQuotaReset:
+		return a.handleQuota(method, request)
 	case MethodManagementRegister:
 		return OKEnvelope(managementRegistration())
 	case MethodManagementHandle:
@@ -133,6 +139,7 @@ func (a *App) configure(raw []byte) error {
 }
 
 func registration() Registration {
+	defaults := billing.DefaultConfig()
 	return Registration{
 		SchemaVersion: SchemaVersion,
 		Metadata: Metadata{
@@ -144,37 +151,44 @@ func registration() Registration {
 			ConfigFields: []ConfigField{
 				{
 					Name:        "debug",
+					Default:     defaults.Debug,
 					Type:        "boolean",
 					Description: "Record debug logs, including routing and reference price matching",
 				},
 				{
 					Name:        "codex_fast_mode_billing",
+					Default:     defaults.CodexFastModeBilling,
 					Type:        "boolean",
 					Description: "Bill Codex priority requests at 2.5 times the standard cost",
 				},
 				{
 					Name:        "mask_api_key_view_emails",
+					Default:     defaults.MaskAPIKeyViewEmails,
 					Type:        "boolean",
 					Description: "Mask email addresses in API key account responses",
 				},
 				{
 					Name:        "allow_api_key_quota_reset",
+					Default:     defaults.AllowAPIKeyQuotaReset,
 					Type:        "boolean",
 					Description: "Allow API key users to reset Codex and Claude auth file quotas using upstream resets",
 				},
 				{
 					Name:        "state_file",
+					Default:     defaults.StateFile,
 					Type:        "string",
 					Description: "Billing database file path",
 				},
 			},
 		},
 		Capabilities: Capabilities{
-			RequestInterceptor:     true,
-			RequestLifecyclePlugin: true,
-			UsagePlugin:            true,
-			ManagementAPI:          true,
-			Scheduler:              true,
+			RequestInterceptor:        true,
+			RequestLifecyclePlugin:    true,
+			UsagePlugin:               true,
+			ManagementAPI:             true,
+			Scheduler:                 true,
+			SchedulerAcrossPriorities: true,
+			QuotaProvider:             true,
 		},
 	}
 }

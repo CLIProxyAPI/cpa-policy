@@ -143,6 +143,11 @@ func (a *App) listRequestEvents(req ManagementRequest, access viewAccess) Manage
 		for i := range view.Entries {
 			view.Entries[i].Scope = ""
 			view.Entries[i].AuthIndex = ""
+			if execution := view.Entries[i].Execution; execution != nil {
+				copy := *execution
+				copy.CredentialRef, copy.BaseURL = "", ""
+				view.Entries[i].Execution = &copy
+			}
 			view.Entries[i].Preview = ""
 			view.Entries[i].Label = ""
 		}

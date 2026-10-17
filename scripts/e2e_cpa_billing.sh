@@ -1209,6 +1209,12 @@ run_target() {
     return 1
   fi
   log_step "插件已注册并启用"
+  management_call GET "$port" "/v0/management/quota/providers" >"$runtime_dir/quota-providers.json"
+  if ! jq -e '.providers[] | select(.plugin_id == "cpa-key-billing" and .supports_reset == true and (.supported_providers | index("codex")))' "$runtime_dir/quota-providers.json" >/dev/null; then
+    echo "插件标准额度能力未注册。" >&2
+    return 1
+  fi
+  log_step "标准额度查询与重置能力已注册"
 
   assert_headless_price_admission "$port" "$runtime_dir"
   account_call "$port" "/v1/models" >"$runtime_dir/models.json"
@@ -1322,13 +1328,26 @@ run_target() {
       expected_cache_write=0
     fi
     expected_uncached=$((expected_input_tokens - expected_cache_read_tokens - expected_cache_write))
+    endpoint="$(client_endpoint "${matrix_clients[$matrix_index]}" "$billing_model" "${matrix_streams[$matrix_index]}")"
+    # CPA reports Gin's matched route rather than the raw Gemini URL.
+    if [[ "${matrix_clients[$matrix_index]}" == "gemini" ]]; then
+      endpoint='/v1beta/models/*action'
+    fi
+    # Origin and stream fields are optional on older supported hosts. Missing
+    # trace identity must leave origin unknown, never infer it from usage.
     if ! jq -e \
       --arg billing_model "$billing_model" \
       --arg upstream_model "${matrix_upstream_models[$matrix_index]}" \
+      --arg endpoint "$endpoint" \
+      --argjson stream "${matrix_streams[$matrix_index]}" \
       --arg source "$expected_source" '
         first(.entries[] | select(.billing_model == $billing_model)) |
         .upstream_model == $upstream_model and
         .source == $source and
+        (if (.execution.trace_id // "") == "" then
+          (.endpoint // "") == "" and (.transport // "") == ""
+        else .endpoint == $endpoint and .transport == "http" end) and
+        (.stream == null or .stream == $stream) and
         .failed == false and
         .accounting_quality == "complete" and
         .price_source == "custom" and
@@ -1336,7 +1355,7 @@ run_target() {
         (.ttft_ms // 0) > 0 and
         .ttft_ms <= .latency_ms
       ' "$request_events_file" >/dev/null; then
-      matrix_reasons[$matrix_index]="模型、来源或延迟不符"
+      matrix_reasons[$matrix_index]="模型、来源、请求类型或延迟不符"
       matrix_failed=$((matrix_failed + 1))
       continue
     fi

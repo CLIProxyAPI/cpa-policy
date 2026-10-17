@@ -293,15 +293,21 @@ func TestUsageHandleDoesNotGuessUnknownProviderAccounting(t *testing.T) {
 
 func TestUsageHandlePersistsBillWithoutPlaintextKeys(t *testing.T) {
 	app, statePath := newAppWithPriceAndState(t, true)
-	app.rememberRequestOrigin(RequestInterceptRequest{TraceID: "privacy-trace"}, flowScope(), "/v1/messages?key=dummy-secret")
+	app.rememberRequestOrigin(RequestInterceptRequest{RequestID: "intercept-request", TraceID: "privacy-trace"}, flowScope(), "/v1/messages?key=dummy-secret")
 	publishUsageRecord(t, app, UsageRecord{
-		TraceID: "privacy-trace", Stream: new(bool),
+		RequestID: "privacy-execution", TraceID: "privacy-trace",
+		SessionID: "session-1", ParentSessionID: "session-parent", AccessProvider: "config-inline", IsNativeKey: new(bool),
+		AuthID: "dummy-auth-secret", BaseURL: "https://dummy:secret@upstream.invalid/dummy-token?key=dummy-query#dummy-fragment", Stream: new(bool),
 		Provider: "openai-compatible-deepseek", ExecutorType: "OpenAICompatExecutor",
 		Model: flowModel, Alias: flowModel, APIKey: testAPIKey,
 		AuthIndex: "auth-3", AuthType: "apikey", Source: "sk-upstream-key-0001",
 		Generate: true, RequestedAt: app.store.Now(),
 		Detail: UsageDetail{InputTokens: 1000, OutputTokens: 500, TotalTokens: 1500},
 	})
+	response := app.listRequestEvents(ManagementRequest{}, viewAccess{APIKey: true, Scope: flowScope(), Tracked: true})
+	if bytes.Contains(response.Body, []byte("upstream.invalid")) || bytes.Contains(response.Body, []byte("credential_ref")) {
+		t.Fatalf("private metadata exposed: %s", response.Body)
+	}
 	app.Shutdown()
 
 	database, errOpen := sqlite.Open(statePath)
@@ -325,6 +331,10 @@ func TestUsageHandlePersistsBillWithoutPlaintextKeys(t *testing.T) {
 		t.Fatalf("persisted event identity = %+v", entry)
 	}
 
+	execution := requests.Entries[0].Execution
+	if execution == nil || execution.RequestID != "privacy-execution" || execution.TraceID != "privacy-trace" || execution.BaseURL != "https://upstream.invalid" || execution.CredentialRef != billing.CredentialFingerprint("dummy-auth-secret") || execution.IsNativeKey == nil || execution.SessionID != "session-1" || execution.ParentSessionID != "session-parent" || execution.AccessProvider != "config-inline" {
+		t.Fatalf("execution metadata lost: %+v", execution)
+	}
 	raw, errRead := os.ReadFile(statePath)
 	if errRead != nil {
 		t.Fatalf("read persisted state: %v", errRead)
@@ -334,6 +344,11 @@ func TestUsageHandlePersistsBillWithoutPlaintextKeys(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte("sk-upstream-key-0001")) {
 		t.Fatal("database contains the plaintext upstream API key")
+	}
+	for _, secret := range []string{"dummy-auth-secret", "dummy-token", "dummy-query", "dummy-fragment", "dummy:secret"} {
+		if bytes.Contains(raw, []byte(secret)) {
+			t.Fatalf("persisted secret %q", secret)
+		}
 	}
 	if bytes.Contains(raw, []byte("dummy-secret")) {
 		t.Fatal("database contains endpoint query parameters")

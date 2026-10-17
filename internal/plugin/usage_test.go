@@ -72,6 +72,28 @@ func TestUsageBreakdownMatchesCurrentHostSemantics(t *testing.T) {
 				Output: billing.TokenOutputBreakdown{TotalTokens: 5, NonReasoningTokens: 2, ReasoningTokens: 3},
 			},
 		},
+		{
+			name: "Meta Responses accounting",
+			record: UsageRecord{Provider: "meta", ExecutorType: "MetaExecutor", Detail: UsageDetail{
+				InputTokens: 100, CacheReadTokens: 40, OutputTokens: 50, ReasoningTokens: 20, TotalTokens: 150,
+			}},
+			want: billing.TokenBreakdown{
+				Quality: billing.TokenAccountingComplete, TotalTokens: 150,
+				Input:  billing.TokenInputBreakdown{TotalTokens: 100, UncachedTokens: 60, CacheReadTokens: 40},
+				Output: billing.TokenOutputBreakdown{TotalTokens: 50, NonReasoningTokens: 30, ReasoningTokens: 20},
+			},
+		},
+		{
+			name: "Devin Interactions accounting",
+			record: UsageRecord{Provider: "devin", ExecutorType: "DevinExecutor", Detail: UsageDetail{
+				InputTokens: 100, CacheReadTokens: 40, OutputTokens: 50, ReasoningTokens: 20, TotalTokens: 170,
+			}},
+			want: billing.TokenBreakdown{
+				Quality: billing.TokenAccountingComplete, TotalTokens: 170,
+				Input:  billing.TokenInputBreakdown{TotalTokens: 100, UncachedTokens: 60, CacheReadTokens: 40},
+				Output: billing.TokenOutputBreakdown{TotalTokens: 70, NonReasoningTokens: 50, ReasoningTokens: 20},
+			},
+		},
 	}
 
 	for _, test := range tests {

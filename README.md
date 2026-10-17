@@ -47,7 +47,7 @@ flowchart TB
 
 ## 环境要求
 
-- CLIProxyAPI `7.2.143` 或更高版本，建议使用最新版本
+- CLIProxyAPI `7.3.7` 或更高版本，建议使用最新版本
 - 使用支持插件的 CLIProxyAPI 构建，不要使用 no-plugin 版本
 
 ## 安装

@@ -47,7 +47,7 @@ flowchart TB
 
 ## Requirements
 
-- CLIProxyAPI **7.2.143 or later**.
+- CLIProxyAPI **7.3.7 or later**.
 - A CLIProxyAPI build with plugin support. Builds labeled `no-plugin` cannot load this plugin.
 
 ## Installation

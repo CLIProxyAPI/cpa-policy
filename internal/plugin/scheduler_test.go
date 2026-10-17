@@ -411,6 +411,14 @@ func TestSchedulerFailsClosedWithoutAUsableRoutedCandidate(t *testing.T) {
 			},
 		},
 		{
+			name: "weight exceeds host limit",
+			rule: billing.RouteRule{CredentialIDs: []string{billing.CredentialFingerprint("a")}},
+			candidates: []SchedulerAuthCandidate{
+				{ID: "a", Provider: "codex", Attributes: map[string]string{"path": "/a", "weight": "1000001"}},
+				{ID: "outside", Provider: "codex", Attributes: map[string]string{"path": "/outside"}},
+			},
+		},
+		{
 			name: "non-positive weight",
 			rule: billing.RouteRule{CredentialIDs: []string{billing.CredentialFingerprint("a")}},
 			candidates: []SchedulerAuthCandidate{
@@ -505,5 +513,44 @@ func TestSubsetSchedulerKeepsAPIKeysAndTemporaryCandidateChangesIndependent(t *t
 	}
 	if picked := scheduler.pick("key-b", "pool", candidates); picked != "a" {
 		t.Fatalf("pruned key pick=%q", picked)
+	}
+}
+
+// Issue #25: route membership is applied before priority, for Codex auth files
+// as well as configured providers. Unavailable candidates are removed by CPA.
+func TestRoutePriorityIssue25(t *testing.T) {
+	a := SchedulerAuthCandidate{ID: "codex-a", Provider: "codex", Priority: 10, Attributes: map[string]string{"source_backend": "file"}}
+	b := SchedulerAuthCandidate{ID: "codex-b", Provider: "codex", Priority: 0, Attributes: map[string]string{"source_backend": "file"}}
+	for _, tc := range []struct {
+		name       string
+		allowed    []string
+		candidates []SchedulerAuthCandidate
+		want       string
+		delegated  bool
+	}{
+		{"only A", []string{a.ID}, []SchedulerAuthCandidate{a, b}, a.ID, false},
+		{"only B", []string{b.ID}, []SchedulerAuthCandidate{a, b}, b.ID, false},
+		{"both preserve host priority", []string{a.ID, b.ID}, []SchedulerAuthCandidate{a, b}, "", true},
+		{"A disabled or cooling down", []string{a.ID, b.ID}, []SchedulerAuthCandidate{b}, "", true},
+		{"allowed subset retains priority", []string{a.ID, b.ID}, []SchedulerAuthCandidate{a, b, {ID: "outside", Provider: "codex", Priority: 20}}, a.ID, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ids := []string{}
+			for _, id := range tc.allowed {
+				ids = append(ids, billing.CredentialFingerprint(id))
+			}
+			app, scope := configuredRoutingApp(t, billing.RouteRule{CredentialIDs: ids})
+			raw, err := app.pickCredential(mustMarshal(t, SchedulerPickRequest{Model: "gpt-5.6", Options: struct {
+				Metadata map[string]any `json:"Metadata"`
+			}{map[string]any{MetadataCallerScope: scope}}, Candidates: tc.candidates}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result SchedulerPickResponse
+			decodeResult(t, raw, &result)
+			if result.Handled == tc.delegated || result.AuthID != tc.want {
+				t.Fatalf("decision=%+v", result)
+			}
+		})
 	}
 }

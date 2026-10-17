@@ -730,3 +730,46 @@ func TestRequestErrorReasonMigration(t *testing.T) {
 		})
 	}
 }
+
+func TestV18ExecutionMetadataMigrationPreservesAllEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v18.db")
+	database := openDatabase(t, path)
+	normal := requestEvent("scope", eventStart)
+	normal.Execution = &billing.ExecutionMetadata{RequestID: "execution"}
+	zero := billing.RequestEvent{At: eventStart.Add(2 * time.Second), Scope: "scope"}
+	failed := billing.RequestEvent{At: eventStart.Add(time.Second), Scope: "scope", Failed: true}
+	mustSave(t, database, billing.NewState(), billing.Changes{NormalRequestEvents: []billing.RequestEvent{normal, zero}, RequestErrorEvents: []billing.RequestErrorEvent{{Event: failed, Error: billing.RequestError{StatusCode: 502, Body: "preserved failure"}}}})
+	if _, err := database.db.Exec("ALTER TABLE request_events DROP COLUMN execution_json; PRAGMA user_version=18;"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database = openDatabase(t, path)
+	view := mustQueryRequestEvents(t, database, billing.RequestEventQuery{})
+	if len(view.Entries) != 3 || view.Statuses.Failed != 1 || view.Entries[1].ErrorBody != "preserved failure" || view.Entries[2].Cost.TotalUSD != normal.Cost.TotalUSD || view.Entries[0].Cost.TotalUSD != 0 {
+		t.Fatalf("history changed: %+v", view)
+	}
+	for _, entry := range view.Entries {
+		if entry.Execution != nil {
+			t.Fatal("invented historical metadata")
+		}
+	}
+	metadata := &billing.ExecutionMetadata{RequestID: "new-execution", TraceID: "trace", SessionID: "session", IsNativeKey: new(bool)}
+	normal.Execution = metadata
+	mustSave(t, database, billing.NewState(), billing.Changes{NormalRequestEvents: []billing.RequestEvent{normal}})
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database = openDatabase(t, path)
+	view = mustQueryRequestEvents(t, database, billing.RequestEventQuery{})
+	found := false
+	for _, entry := range view.Entries {
+		if entry.Execution != nil && entry.Execution.RequestID == metadata.RequestID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("execution metadata lost after reopening")
+	}
+}

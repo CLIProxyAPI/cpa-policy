@@ -286,7 +286,7 @@ function renderKeyRoutes(view) {
 
 async function importCPAMPLabels() {
   const generation = sessionGeneration;
-  const result = await api("GET", "/v0/management/api-key-aliases", null, { raw: true });
+  const result = await api("GET", "/v0/management/api-key-aliases", null);
   if (
     !Array.isArray(result?.items) ||
     result.items.some(

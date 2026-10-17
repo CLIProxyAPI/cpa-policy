@@ -10,7 +10,7 @@ import (
 
 const (
 	ABIVersion    uint32 = 1
-	SchemaVersion uint32 = 4
+	SchemaVersion uint32 = 6
 )
 
 // Plugin identity. PluginID doubles as the dynamic library file name, the
@@ -39,6 +39,10 @@ const (
 
 	MethodManagementRegister = "management.register"
 	MethodManagementHandle   = "management.handle"
+	MethodQuotaIdentifier    = "quota.identifier"
+	MethodQuotaDescribe      = "quota.describe"
+	MethodQuotaFetch         = "quota.fetch"
+	MethodQuotaReset         = "quota.reset"
 )
 
 const (
@@ -91,15 +95,18 @@ type Metadata struct {
 type ConfigField struct {
 	Name        string `json:"Name"`
 	Type        string `json:"Type"`
+	Default     any    `json:"Default"`
 	Description string `json:"Description"`
 }
 
 type Capabilities struct {
-	RequestInterceptor     bool `json:"request_interceptor"`
-	RequestLifecyclePlugin bool `json:"request_lifecycle_plugin"`
-	UsagePlugin            bool `json:"usage_plugin"`
-	ManagementAPI          bool `json:"management_api"`
-	Scheduler              bool `json:"scheduler"`
+	RequestInterceptor        bool `json:"request_interceptor"`
+	RequestLifecyclePlugin    bool `json:"request_lifecycle_plugin"`
+	UsagePlugin               bool `json:"usage_plugin"`
+	ManagementAPI             bool `json:"management_api"`
+	Scheduler                 bool `json:"scheduler"`
+	SchedulerAcrossPriorities bool `json:"scheduler_across_priorities"`
+	QuotaProvider             bool `json:"quota_provider"`
 }
 
 type SchedulerPickRequest struct {
@@ -113,6 +120,7 @@ type SchedulerPickRequest struct {
 type SchedulerAuthCandidate struct {
 	ID         string            `json:"ID"`
 	Provider   string            `json:"Provider"`
+	Priority   int               `json:"Priority"`
 	Status     string            `json:"Status"`
 	Attributes map[string]string `json:"Attributes"`
 }
@@ -147,12 +155,19 @@ type RequestInterceptResponse struct {
 }
 
 type UsageRecord struct {
+	RequestID           string        `json:"RequestID"`
 	TraceID             string        `json:"TraceID"`
 	Provider            string        `json:"Provider"`
+	BaseURL             string        `json:"BaseURL"`
 	ExecutorType        string        `json:"ExecutorType"`
 	Model               string        `json:"Model"`
 	Alias               string        `json:"Alias"`
 	APIKey              string        `json:"APIKey"`
+	IsNativeKey         *bool         `json:"IsNativeKey"`
+	AccessProvider      string        `json:"AccessProvider"`
+	SessionID           string        `json:"SessionID"`
+	ParentSessionID     string        `json:"ParentSessionID"`
+	AuthID              string        `json:"AuthID"`
 	AuthIndex           string        `json:"AuthIndex"`
 	AuthType            string        `json:"AuthType"`
 	Source              string        `json:"Source"`
@@ -216,4 +231,46 @@ type ManagementResponse struct {
 	StatusCode int         `json:"StatusCode,omitempty"`
 	Headers    http.Header `json:"Headers,omitempty"`
 	Body       []byte      `json:"Body,omitempty"`
+}
+
+type QuotaRequest struct {
+	AuthIndex      string `json:"auth_index"`
+	AuthID         string `json:"auth_id"`
+	Provider       string `json:"provider"`
+	HostCallbackID string `json:"host_callback_id"`
+}
+
+type QuotaResponse struct {
+	Subscription *QuotaSubscription `json:"subscription,omitempty"`
+	Summary      []QuotaMetric      `json:"summary,omitempty"`
+	Groups       []QuotaGroup       `json:"groups,omitempty"`
+}
+type QuotaSubscription struct {
+	Plan string `json:"plan,omitempty"`
+}
+type QuotaMetric struct {
+	Key      string  `json:"key"`
+	Label    string  `json:"label"`
+	Value    float64 `json:"value"`
+	Format   string  `json:"format,omitempty"`
+	Currency string  `json:"currency,omitempty"`
+}
+type QuotaGroup struct {
+	DisplayName string        `json:"displayName,omitempty"`
+	Buckets     []QuotaBucket `json:"buckets,omitempty"`
+}
+type QuotaBucket struct {
+	Window            string  `json:"window,omitempty"`
+	RemainingFraction float64 `json:"remainingFraction"`
+	ResetTime         string  `json:"resetTime,omitempty"`
+}
+
+type QuotaDescription struct {
+	SupportedProviders []string `json:"supported_providers"`
+	DisplayName        string   `json:"display_name"`
+	SupportsReset      bool     `json:"supports_reset"`
+}
+type QuotaResetResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
 }

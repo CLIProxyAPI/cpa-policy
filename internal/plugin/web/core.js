@@ -138,25 +138,6 @@ async function recalledCredential(role, includeSession = false) {
   } catch (_) { return ""; }
 }
 
-// CLIProxyAPI HTML-escapes every string in a plugin management response, so a
-// label saved as "A & B" comes back as "A &amp; B". Left alone it would gain
-// another layer on every round trip, so responses are decoded on arrival.
-const ENTITIES = [[/&lt;/g, "<"], [/&gt;/g, ">"], [/&#34;/g, '"'], [/&#39;/g, "'"], [/&amp;/g, "&"]];
-function unescapeDeep(value) {
-  if (typeof value === "string") {
-    let out = value;
-    for (const [pattern, replacement] of ENTITIES) out = out.replace(pattern, replacement);
-    return out;
-  }
-  if (Array.isArray(value)) return value.map(unescapeDeep);
-  if (value && typeof value === "object") {
-    const out = {};
-    for (const key of Object.keys(value)) out[key] = unescapeDeep(value[key]);
-    return out;
-  }
-  return value;
-}
-
 class AuthError extends UIError {}
 class StaleRequestError extends Error {}
 
@@ -190,10 +171,10 @@ async function api(method, path, body, opts) {
   if (text) { try { payload = JSON.parse(text); } catch (_) { if (resp.ok) throw new UIError(m("ui.invalid_server_response")); } }
   if (!resp.ok) {
     const detail = payload?.error?.message ?? payload?.error;
-    const decoded = typeof detail === "string" ? unescapeDeep(detail).replace(/\s+/g, " ").trim() : "";
+    const messageText = typeof detail === "string" ? detail.replace(/\s+/g, " ").trim() : "";
     // Proxy error pages and response dumps are not user-facing messages.
-    const fallback = decoded && !/<[^>]+>/.test(decoded) ? decoded.slice(0, 200) + (decoded.length > 200 ? "…" : "") : "";
-    const message = window.billingI18n.serverMessage(unescapeDeep(payload?.error), fallback);
+    const fallback = messageText && !/<[^>]+>/.test(messageText) ? messageText.slice(0, 200) + (messageText.length > 200 ? "…" : "") : "";
+    const message = window.billingI18n.serverMessage(payload?.error, fallback);
     if ((resp.status === 401 || (resp.status === 403 && !opts?.keepSessionOnForbidden)) && !opts?.auxiliaryCredential) {
       throw new AuthError(
         message || (currentRole === "account" ? m("ui.invalid_api_key_or_access_denied") : m("ui.invalid_management_key_or_access_denied"))
@@ -206,11 +187,11 @@ async function api(method, path, body, opts) {
           : m("ui.server_error_http_value", { v0: resp.status }))
     );
   }
-  return opts?.raw ? payload : unescapeDeep(payload);
+  return payload;
 }
 
 const plugin = (method, path, body, opts) => api(method, PLUGIN_BASE + path, body, opts);
-const accountAPI = (path, opts) => api("GET", ACCOUNT_BASE + path, null, { ...opts, raw: true });
+const accountAPI = (path, opts) => api("GET", ACCOUNT_BASE + path, null, opts);
 
 function requireObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new UIError(m("ui.invalid_response_for_value", { v0: label }));

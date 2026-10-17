@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"math"
+	"net/url"
 	"strings"
 
 	"cpa-key-billing/internal/billing"
@@ -90,9 +91,9 @@ func usageBreakdown(record UsageRecord) billing.TokenBreakdown {
 	}
 }
 
-// Keep this marker order byte-for-byte equivalent to CLIProxyAPI's current
-// sdk/cliproxy/usage classifier. OpenAI-compatible executors win before any
-// provider substring classification.
+// Native executors can publish a canonical breakdown that the RPC contract
+// flattens. Match their known parser semantics before the host's legacy
+// provider classifier; unknown executors must remain unclassified.
 func usageSemantics(provider, executorType string) tokenSemantics {
 	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
 	normalizedExecutor := strings.ToLower(strings.TrimSpace(executorType))
@@ -103,6 +104,12 @@ func usageSemantics(provider, executorType string) tokenSemantics {
 	if normalizedExecutor == "openaicompatexecutor" || normalizedProvider == "openai-compatibility" ||
 		strings.HasPrefix(normalizedProvider, "openai-compatible-") {
 		return tokenSemanticsSubset
+	}
+	switch normalizedExecutor {
+	case "metaexecutor": // ParseCodexUsage: reasoning and cache are subsets.
+		return tokenSemanticsSubset
+	case "devinexecutor": // ParseInteractionsUsage: reasoning is separate.
+		return tokenSemanticsSeparateReasoning
 	}
 	if strings.Contains(value, "claude") || strings.Contains(value, "anthropic") {
 		return tokenSemanticsIndependent
@@ -269,4 +276,25 @@ func unclassifiedLowerBound(input, output, reasoning, cacheRead, cacheWrite, cac
 		output = reasoning
 	}
 	return checkedTokenSum(input, output)
+}
+
+func (record UsageRecord) executionMetadata() *billing.ExecutionMetadata {
+	metadata := &billing.ExecutionMetadata{
+		RequestID: strings.TrimSpace(record.RequestID), TraceID: strings.TrimSpace(record.TraceID),
+		SessionID: strings.TrimSpace(record.SessionID), ParentSessionID: strings.TrimSpace(record.ParentSessionID),
+		AccessProvider: strings.TrimSpace(record.AccessProvider), IsNativeKey: record.IsNativeKey,
+	}
+	if id := strings.TrimSpace(record.AuthID); id != "" {
+		metadata.CredentialRef = billing.CredentialFingerprint(id)
+	}
+	// An upstream URL may contain credentials in any URL component. Store only
+	// its HTTP origin, never user info, query parameters, fragments or path tokens.
+	if parsed, err := url.Parse(strings.TrimSpace(record.BaseURL)); err == nil &&
+		(parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" {
+		metadata.BaseURL = parsed.Scheme + "://" + parsed.Host
+	}
+	if *metadata == (billing.ExecutionMetadata{}) {
+		return nil
+	}
+	return metadata
 }

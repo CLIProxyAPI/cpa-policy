@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,9 +19,12 @@ import (
 )
 
 const (
-	hostAuthList = "host.auth.list"
-	hostAuthGet  = "host.auth.get"
+	hostAuthList             = "host.auth.list"
+	hostAuthGet              = "host.auth.get"
+	hostRoutingResetCooldown = "host.routing.reset_cooldown"
 )
+
+var authQuotaProviders = []string{"claude", "antigravity", "codex", "xai", "kimi"}
 
 const xaiGrokClientVersion = "1.0.44"
 
@@ -134,7 +138,7 @@ func (a *App) authQuota(req ManagementRequest, access viewAccess) ManagementResp
 	if selected == nil {
 		return failure
 	}
-	result, errQuota := a.fetchAuthQuota(req.HostCallbackID, *selected, authCategory(selected.Type))
+	result, errQuota := a.fetchAuthQuota(req.HostCallbackID, *selected)
 	if errQuota != nil {
 		return viewDetailedError(access, http.StatusBadGateway, "quota_failed", errQuota)
 	}
@@ -157,13 +161,7 @@ func (a *App) authQuotaReset(req ManagementRequest, access viewAccess) Managemen
 	if selected == nil {
 		return failure
 	}
-	var reset func(*authQuotaClient, string) error
-	switch authCategory(selected.Type) {
-	case "codex":
-		reset = (*authQuotaClient).resetCodexQuota
-	case "claude":
-		reset = (*authQuotaClient).resetClaudeQuota
-	default:
+	if category := authCategory(selected.Type); category != "codex" && category != "claude" {
 		return viewJSONError(access, http.StatusUnprocessableEntity, "unsupported", "Quota resets are not supported for this auth file type")
 	}
 	name := selected.Name
@@ -173,16 +171,11 @@ func (a *App) authQuotaReset(req ManagementRequest, access viewAccess) Managemen
 	if !req.Query.Has("auth_revision") || req.Query.Get("auth_revision") != authFileRevision(*selected) || req.Query.Get("auth_name") != name {
 		return viewJSONError(access, http.StatusConflict, "auth_file_changed", "Auth file changed; refresh the auth file list and try again")
 	}
-	client, errClient := a.openAuthQuotaClient(req.HostCallbackID, *selected)
-	if errClient != nil {
-		return viewDetailedError(access, http.StatusBadGateway, "reset_failed", errClient)
-	}
-	defer client.close()
-	if errReset := reset(client, resetID); errReset != nil {
+	cleared, errReset := a.resetAuthQuota(req.HostCallbackID, *selected, resetID)
+	if errReset != nil {
 		return viewDetailedError(access, http.StatusBadGateway, "reset_failed", errReset)
 	}
-	// Refresh separately so a failed query cannot obscure a successful reset.
-	return viewJSON(access, http.StatusOK, map[string]bool{"reset": true})
+	return viewJSON(access, http.StatusOK, map[string]bool{"reset": true, "cooldown_cleared": cleared})
 }
 
 func (a *App) resolveQuotaAuthFile(req ManagementRequest, access viewAccess) (*hostAuthFile, ManagementResponse) {
@@ -190,21 +183,11 @@ func (a *App) resolveQuotaAuthFile(req ManagementRequest, access viewAccess) (*h
 	if authIndex == "" || len(authIndex) > 512 {
 		return nil, viewJSONError(access, http.StatusBadRequest, "invalid", "Invalid auth file identifier")
 	}
-	files, errList := a.listHostAuthFiles()
+	selected, errList := a.findAuthFile(authIndex)
 	if errList != nil {
 		return nil, viewDetailedError(access, http.StatusBadGateway, "host_unavailable", errList)
 	}
-	var selected *hostAuthFile
-	for i := range files {
-		if files[i].AuthIndex == authIndex {
-			selected = &files[i]
-			break
-		}
-	}
 	if selected == nil {
-		return nil, viewJSONError(access, http.StatusNotFound, "not_found", "Auth file does not exist")
-	}
-	if strings.EqualFold(strings.TrimSpace(selected.AccountType), "api_key") {
 		return nil, viewJSONError(access, http.StatusNotFound, "not_found", "Auth file does not exist")
 	}
 	if access.APIKey {
@@ -213,14 +196,12 @@ func (a *App) resolveQuotaAuthFile(req ManagementRequest, access viewAccess) (*h
 			return nil, viewJSONError(access, http.StatusNotFound, "not_found", "Auth file does not exist")
 		}
 	}
-	if selected.Disabled {
-		return nil, viewJSONError(access, http.StatusUnprocessableEntity, "disabled", "Auth file is disabled")
-	}
-	if authCategoryOrder(authCategory(selected.Type)) == 5 {
-		return nil, viewJSONError(access, http.StatusUnprocessableEntity, "unsupported", "Quota queries are not supported for this auth file type")
-	}
-	if selected.RuntimeOnly {
-		return nil, viewJSONError(access, http.StatusUnprocessableEntity, "unsupported", "Runtime-only auth files have no readable credentials")
+	if supported, reason := authQuotaAvailability(*selected, authCategory(selected.Type)); !supported {
+		code := "unsupported"
+		if selected.Disabled {
+			code = "disabled"
+		}
+		return nil, viewJSONError(access, http.StatusUnprocessableEntity, code, reason)
 	}
 	return selected, ManagementResponse{}
 }
@@ -280,7 +261,7 @@ func (a *App) listAuthFiles(access viewAccess, from, to time.Time) ([]authFileVi
 		if left != right {
 			return left < right
 		}
-		if left == 5 && views[i].Category != views[j].Category {
+		if left == len(authQuotaProviders) && views[i].Category != views[j].Category {
 			return views[i].Category < views[j].Category
 		}
 		leftName, rightName := strings.ToLower(views[i].Name), strings.ToLower(views[j].Name)
@@ -299,7 +280,7 @@ func authQuotaAvailability(file hostAuthFile, category string) (bool, string) {
 	if file.RuntimeOnly {
 		return false, "Runtime-only auth files have no readable credentials"
 	}
-	if authCategoryOrder(category) == 5 {
+	if !slices.Contains(authQuotaProviders, category) {
 		return false, "Quota queries are not supported for this auth file type"
 	}
 	return true, ""
@@ -366,29 +347,148 @@ func authCategory(authType string) string {
 }
 
 func authCategoryOrder(category string) int {
-	switch category {
-	case "claude":
-		return 0
-	case "antigravity":
-		return 1
-	case "codex":
-		return 2
-	case "xai":
-		return 3
-	case "kimi":
-		return 4
-	default:
-		return 5
+	if index := slices.Index(authQuotaProviders, category); index >= 0 {
+		return index
 	}
+	return len(authQuotaProviders)
 }
 
-func (a *App) fetchAuthQuota(callbackID string, file hostAuthFile, provider string) (authQuotaResponse, error) {
+func (a *App) findAuthFile(authIndex string) (*hostAuthFile, error) {
+	files, err := a.listHostAuthFiles()
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		if file.AuthIndex == authIndex && !strings.EqualFold(strings.TrimSpace(file.AccountType), "api_key") {
+			return &file, nil
+		}
+	}
+	return nil, nil
+}
+
+func (a *App) handleQuota(method string, raw []byte) ([]byte, error) {
+	var req QuotaRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, err
+	}
+	file, err := a.findAuthFile(strings.TrimSpace(req.AuthIndex))
+	if err != nil {
+		return nil, err
+	}
+	if file == nil || file.AuthIndex == "" {
+		return nil, messages.Errorf("Auth file does not exist")
+	}
+	if req.AuthID != "" && req.AuthID != file.ID {
+		return nil, fmt.Errorf("Credential changed; refresh the credential list")
+	}
+	if req.Provider != "" && !strings.EqualFold(req.Provider, file.Type) {
+		return nil, fmt.Errorf("Credential provider does not match")
+	}
+	if supported, reason := authQuotaAvailability(*file, authCategory(file.Type)); !supported {
+		return nil, fmt.Errorf("%s", reason)
+	}
+	if method == MethodQuotaFetch {
+		quota, err := a.fetchAuthQuota(req.HostCallbackID, *file)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(quota.normalized())
+	}
+	cleared, err := a.resetAuthQuota(req.HostCallbackID, *file, newQuotaResetID())
+	if err != nil {
+		return nil, err
+	}
+	response := QuotaResetResponse{Success: true}
+	if !cleared {
+		response.Message = "Upstream quota reset succeeded; local routing cooldown could not be cleared"
+	}
+	return OKEnvelope(response)
+}
+
+func (input authQuotaResponse) normalized() QuotaResponse {
+	result := QuotaResponse{}
+	if input.Plan != "" {
+		result.Subscription = &QuotaSubscription{Plan: input.Plan}
+	}
+	if input.CreditsUnlimited {
+		result.Groups = append(result.Groups, QuotaGroup{DisplayName: "Credits", Buckets: []QuotaBucket{{Window: "Unlimited credits", RemainingFraction: 1}}})
+	} else if value, err := strconv.ParseFloat(input.CreditBalance, 64); err == nil && value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0) {
+		metric := QuotaMetric{Key: "credit_balance", Label: "Credit balance", Value: value, Format: "number"}
+		if input.CreditCurrency != "" {
+			metric.Format, metric.Currency = "currency", input.CreditCurrency
+		}
+		result.Summary = append(result.Summary, metric)
+	}
+	if input.RateLimitResetCreditsAvailableCount != nil {
+		result.Summary = append(result.Summary, QuotaMetric{Key: "reset_credits", Label: "Available quota resets", Value: float64(*input.RateLimitResetCreditsAvailableCount), Format: "number"})
+	}
+	positions := map[string]int{}
+	for _, row := range input.Quota {
+		percent := row.RemainingPercent
+		if percent == nil && row.Used != nil && row.Limit != nil && *row.Limit > 0 {
+			value := 100 * (1 - *row.Used / *row.Limit)
+			percent = &value
+		}
+		// The host requires a number for each bucket. Unknown remaining quota must
+		// be omitted instead of being presented as exhausted or unlimited.
+		if percent == nil || math.IsNaN(*percent) || math.IsInf(*percent, 0) {
+			continue
+		}
+		name := firstNonEmptyString(row.GroupLabel, row.GroupMessage.Text, "Quota")
+		index, exists := positions[name]
+		if !exists {
+			index = len(result.Groups)
+			positions[name] = index
+			result.Groups = append(result.Groups, QuotaGroup{DisplayName: name})
+		}
+		result.Groups[index].Buckets = append(result.Groups[index].Buckets, QuotaBucket{
+			Window:            row.LabelPrefix + firstNonEmptyString(row.Label, row.LabelMessage.Text, "Quota"),
+			RemainingFraction: math.Max(0, math.Min(1, *percent/100)), ResetTime: row.ResetAt,
+		})
+	}
+	return result
+}
+
+func newQuotaResetID() string {
+	var bytes [16]byte
+	_, _ = rand.Read(bytes[:])
+	bytes[6] = bytes[6]&0x0f | 0x40
+	bytes[8] = bytes[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", bytes[:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:])
+}
+
+func (a *App) resetAuthQuota(callbackID string, file hostAuthFile, resetID string) (bool, error) {
+	var reset func(*authQuotaClient, string) error
+	switch authCategory(file.Type) {
+	case "codex":
+		reset = (*authQuotaClient).resetCodexQuota
+	case "claude":
+		reset = (*authQuotaClient).resetClaudeQuota
+	default:
+		return false, fmt.Errorf("Quota resets are not supported for this auth file type")
+	}
+	client, err := a.openAuthQuotaClient(callbackID, file)
+	if err != nil {
+		return false, err
+	}
+	defer client.close()
+	if err := reset(client, resetID); err != nil {
+		return false, err
+	}
+	// Upstream reset already succeeded. A missing optional callback or local
+	// cooldown error must never turn this into a failed, retryable redemption.
+	_, err = a.hostCaller(hostRoutingResetCooldown, map[string]string{"auth_index": file.AuthIndex, "host_callback_id": callbackID})
+	return err == nil, nil
+}
+
+func (a *App) fetchAuthQuota(callbackID string, file hostAuthFile) (authQuotaResponse, error) {
 	client, errClient := a.openAuthQuotaClient(callbackID, file)
 	if errClient != nil {
 		return authQuotaResponse{}, errClient
 	}
 	defer client.close()
 	credential := client.credential
+	provider := authCategory(file.Type)
 	result := authQuotaResponse{AuthRevision: authFileRevision(file), FetchedAt: time.Now().UTC(), Quota: []quotaRow{}}
 	if provider == "xai" && paidXAICredential(credential) {
 		result.Plan = "Paid"

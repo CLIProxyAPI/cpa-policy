@@ -34,11 +34,23 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if version <= 16 {
 		steps = append(steps, migrateUpstreamResponseReports)
 	}
-	steps = append(steps, migrateRequestInfo)
+	if version <= 17 {
+		steps = append(steps, migrateRequestInfo)
+	}
+	steps = append(steps, migrateExecutionMetadata)
 	for _, step := range steps {
 		if err := step(tx); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// Schema 19 adds only metadata reported by usage.handle; historical rows stay unknown.
+func migrateExecutionMetadata(tx *sql.Tx) error {
+	_, err := tx.Exec("ALTER TABLE request_events ADD COLUMN execution_json TEXT NOT NULL DEFAULT 'null'")
+	if err != nil {
+		return fmt.Errorf("Add execution metadata: %w", err)
 	}
 	return nil
 }
