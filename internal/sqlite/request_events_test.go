@@ -148,9 +148,12 @@ func TestRequestEventAccountChangesPreserveHistory(t *testing.T) {
 	database, state := requestEventDatabase(t)
 	original := mustQueryRequestEvents(t, database, billing.RequestEventQuery{})
 	entry := requestEvent("scope-a", eventStart.Add(10*time.Minute))
+	streaming, nonStreaming := true, false
 	entry.Account = "new@example.com"
+	entry.Endpoint, entry.Transport, entry.Stream = "/v1/messages", "http", &nonStreaming
 	mustSave(t, database, state, billing.Changes{RequestErrorEvents: []billing.RequestErrorEvent{{Event: entry}}})
 	entry.Provider = "openai-compatible-dummy"
+	entry.Endpoint, entry.Transport, entry.Stream = "/v1/responses", "websocket", &streaming
 	mustSave(t, database, state, billing.Changes{RequestErrorEvents: []billing.RequestErrorEvent{{Event: entry}}})
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
@@ -161,12 +164,14 @@ func TestRequestEventAccountChangesPreserveHistory(t *testing.T) {
 	}
 	wantSources := make(map[string]int64)
 	for _, test := range []struct {
-		source           string
-		requests, failed int
+		source              string
+		requests, failed    int
+		endpoint, transport string
+		stream              *bool
 	}{
-		{"codex · ops@example.com", 6, 2},
-		{"codex · new@example.com", 1, 1},
-		{"dummy · new@example.com", 1, 1},
+		{"codex · ops@example.com", 6, 2, "", "", nil},
+		{"codex · new@example.com", 1, 1, "/v1/messages", "http", &nonStreaming},
+		{"dummy · new@example.com", 1, 1, "/v1/responses", "websocket", &streaming},
 	} {
 		wantSources[test.source] = int64(test.requests)
 		query := billing.RequestEventQuery{Source: test.source,
@@ -174,6 +179,11 @@ func TestRequestEventAccountChangesPreserveHistory(t *testing.T) {
 		view := mustQueryRequestEvents(t, database, query)
 		if view.Total != test.requests || view.Statuses.Failed != test.failed || len(view.Filters.Sources) != 3 {
 			t.Fatalf("filtered events = %+v", view)
+		}
+		for _, row := range view.Entries {
+			if row.Endpoint != test.endpoint || row.Transport != test.transport || !reflect.DeepEqual(row.Stream, test.stream) {
+				t.Fatalf("request metadata changed after reopen: %+v", row)
+			}
 		}
 		errors, err := database.RequestErrors(billing.RequestErrorQuery{Source: test.source}, eventStart)
 		if err != nil || errors.Total != test.failed || errors.Entries[0].Source != test.source {

@@ -16,6 +16,7 @@
   "ui.sign_out": "Sign out",
   "ui.analysis": "Analysis",
   "ui.request_events": "Request events",
+  "ui.request": "Request",
   "ui.error_events": "Error events",
   "ui.auth_files": "Auth Files",
   "ui.auth_file_routing": "Priority: {priority} · Weight: {weight}",

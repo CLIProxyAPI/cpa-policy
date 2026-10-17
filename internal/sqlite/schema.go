@@ -133,7 +133,10 @@ CREATE TABLE request_events (
 	applied_output_per_1m       REAL    NOT NULL DEFAULT 0,
 	applied_cache_read_per_1m   REAL    NOT NULL DEFAULT 0,
 	applied_cache_write_per_1m  REAL    NOT NULL DEFAULT 0,
-	response_headers_json       TEXT    NOT NULL DEFAULT '{}'
+	response_headers_json       TEXT    NOT NULL DEFAULT '{}',
+	endpoint                    TEXT    NOT NULL DEFAULT '',
+	transport                   TEXT    NOT NULL DEFAULT '',
+	stream                      INTEGER
 );
 
 CREATE TABLE request_errors (

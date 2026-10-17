@@ -95,11 +95,19 @@ func TestUsageHandleBillsWithoutResponseOrCompletionHooks(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("Requests = %d, want 1", requests)
 	}
+	if entry := requestEventEntries(t, app)[0]; entry.Endpoint != "" || entry.Transport != "" || entry.Stream != nil {
+		t.Fatalf("missing host metadata was reconstructed: %+v", entry)
+	}
 }
 
 func TestUsageHandleUsesClientKeyModelAliasAndCredential(t *testing.T) {
 	app := newAppWithPrice(t, true)
+	if response := interceptWithID(t, app, "metadata-trace", true); response.Terminate {
+		t.Fatalf("request rejected: %+v", response)
+	}
+	stream := true
 	publishUsageRecord(t, app, UsageRecord{
+		TraceID: "metadata-trace", Stream: &stream,
 		Provider: "codex", ExecutorType: "CodexExecutor", Model: flowModel, Alias: "route/gpt-5.5",
 		ResponseModel: "gpt-5.6-luna", APIKey: testAPIKey, AuthIndex: "auth-7", AuthType: "oauth",
 		Source: "billing@example.com", ReasoningEffort: "high", ServiceTier: "priority", ResponseServiceTier: "default",
@@ -117,7 +125,8 @@ func TestUsageHandleUsesClientKeyModelAliasAndCredential(t *testing.T) {
 		entry.ResponseServiceTier != "default" || entry.ResponseModel != "gpt-5.6-luna" ||
 		entry.UpstreamModel != flowModel || entry.BillingModel != "route/gpt-5.5" || entry.Failed ||
 		entry.Source != "codex · billing@example.com" || entry.AccountingQuality != billing.TokenAccountingComplete ||
-		entry.LatencyMS != 1500 || entry.TTFTMS != 250 {
+		entry.LatencyMS != 1500 || entry.TTFTMS != 250 ||
+		entry.Endpoint != "/v1/responses" || entry.Transport != "http" || entry.Stream == nil || !*entry.Stream {
 		t.Fatalf("entry = %+v", entry)
 	}
 }
@@ -167,12 +176,37 @@ func TestUsageHandleReportsZeroUsageFailureAndBillsReportedFailureUsage(t *testi
 
 func TestUsageHandleBillsTheSuccessfulRetryAttemptOnce(t *testing.T) {
 	app := newAppWithPrice(t, true)
+	req := RequestInterceptRequest{
+		RequestID: "retry-request", TraceID: "retry-trace", Model: flowModel,
+		Headers:  http.Header{"Connection": {"keep-alive, Upgrade"}, "Upgrade": {"WebSocket"}},
+		Metadata: map[string]any{MetadataCallerScope: flowScope(), MetadataRequestPath: "/v1/responses"},
+	}
+	raw, err := app.HandleMethod(MethodRequestInterceptBefore, mustMarshal(t, req))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response RequestInterceptResponse
+	decodeResult(t, raw, &response)
+	if response.Terminate {
+		t.Fatalf("request rejected: %+v", response)
+	}
+	completeRequest(t, app, req.RequestID)
+	// Async usage survives completion; nested helpers must not replace its origin.
+	req.Headers = nil
+	req.Metadata[MetadataSource] = SourcePluginHostModelCallback
+	req.Metadata[MetadataRequestPath] = "/helper"
+	if _, err := app.HandleMethod(MethodRequestInterceptBefore, mustMarshal(t, req)); err != nil {
+		t.Fatal(err)
+	}
+	stream := true
 	publishUsageRecord(t, app, UsageRecord{
+		TraceID: req.TraceID, Stream: &stream,
 		Provider: "codex", Model: flowModel, Alias: flowModel, APIKey: testAPIKey,
 		AuthIndex: "auth-failed", AuthType: "oauth", Source: "failed@example.com",
 		Generate: true, Failed: true,
 	})
 	publishUsageRecord(t, app, UsageRecord{
+		TraceID: req.TraceID, Stream: &stream,
 		Provider: "codex", Model: flowModel, Alias: flowModel, APIKey: testAPIKey,
 		AuthIndex: "auth-success", AuthType: "oauth", Source: "success@example.com",
 		Generate: true, RequestedAt: app.store.Now(),
@@ -186,6 +220,11 @@ func TestUsageHandleBillsTheSuccessfulRetryAttemptOnce(t *testing.T) {
 		entries[0].Source != "codex · success@example.com" {
 		t.Fatalf("entries = %+v", entries)
 	}
+	for _, entry := range requestEventEntries(t, app) {
+		if entry.Endpoint != "/v1/responses" || entry.Transport != "websocket" || entry.Stream == nil || !*entry.Stream {
+			t.Fatalf("retry lost its request origin: %+v", entry)
+		}
+	}
 }
 
 func TestUsageHandleBillsNonGeneratingRequest(t *testing.T) {
@@ -193,6 +232,7 @@ func TestUsageHandleBillsNonGeneratingRequest(t *testing.T) {
 	publishUsageRecord(t, app, UsageRecord{
 		Provider: "codex", ExecutorType: "CodexWebsocketsExecutor",
 		Model: flowModel, Alias: flowModel, APIKey: testAPIKey, Generate: false,
+		Stream: new(bool), TTFT: 12 * time.Millisecond, Latency: 12 * time.Millisecond,
 		Detail: UsageDetail{InputTokens: 1000, CacheReadTokens: 400, TotalTokens: 1000},
 	})
 	cost, requests := requestEventCost(t, app)
@@ -203,6 +243,9 @@ func TestUsageHandleBillsNonGeneratingRequest(t *testing.T) {
 	entries := requestEventEntries(t, app)
 	if len(entries) != 1 || entries[0].Cost.CacheReadTokens != 400 || entries[0].Cost.BilledOutputTokens != 0 {
 		t.Fatalf("entries = %+v", entries)
+	}
+	if entry := entries[0]; entry.Endpoint != "" || entry.Transport != "" || entry.Stream == nil || *entry.Stream || entry.TTFTMS != 12 {
+		t.Fatalf("invented request metadata or changed host timing: %+v", entry)
 	}
 }
 
@@ -250,7 +293,9 @@ func TestUsageHandleDoesNotGuessUnknownProviderAccounting(t *testing.T) {
 
 func TestUsageHandlePersistsBillWithoutPlaintextKeys(t *testing.T) {
 	app, statePath := newAppWithPriceAndState(t, true)
+	app.rememberRequestOrigin(RequestInterceptRequest{TraceID: "privacy-trace"}, flowScope(), "/v1/messages?key=dummy-secret")
 	publishUsageRecord(t, app, UsageRecord{
+		TraceID: "privacy-trace", Stream: new(bool),
 		Provider: "openai-compatible-deepseek", ExecutorType: "OpenAICompatExecutor",
 		Model: flowModel, Alias: flowModel, APIKey: testAPIKey,
 		AuthIndex: "auth-3", AuthType: "apikey", Source: "sk-upstream-key-0001",
@@ -275,7 +320,8 @@ func TestUsageHandlePersistsBillWithoutPlaintextKeys(t *testing.T) {
 	if errRequests != nil || len(requests.Entries) != 1 || requests.Entries[0].Cost.TotalUSD <= 0 {
 		t.Fatalf("persisted request events = %+v, err = %v", requests.Entries, errRequests)
 	}
-	if entry := requests.Entries[0]; entry.Account != "sk-ups…0001" || entry.Source != "deepseek · sk-ups…0001" {
+	if entry := requests.Entries[0]; entry.Account != "sk-ups…0001" || entry.Source != "deepseek · sk-ups…0001" ||
+		entry.Endpoint != "/v1/messages" || entry.Transport != "http" || entry.Stream == nil || *entry.Stream {
 		t.Fatalf("persisted event identity = %+v", entry)
 	}
 
@@ -288,6 +334,9 @@ func TestUsageHandlePersistsBillWithoutPlaintextKeys(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte("sk-upstream-key-0001")) {
 		t.Fatal("database contains the plaintext upstream API key")
+	}
+	if bytes.Contains(raw, []byte("dummy-secret")) {
+		t.Fatal("database contains endpoint query parameters")
 	}
 }
 

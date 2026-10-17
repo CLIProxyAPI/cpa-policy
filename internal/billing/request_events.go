@@ -8,6 +8,9 @@ import (
 // RequestEvent is one persisted request record and never stores a plaintext API key.
 // Account contains only an OAuth identity or masked API key.
 type RequestEvent struct {
+	Endpoint            string    `json:"endpoint,omitempty"`
+	Transport           string    `json:"transport,omitempty"`
+	Stream              *bool     `json:"stream,omitempty"`
 	At                  time.Time `json:"at"`
 	Scope               string    `json:"scope"`
 	AuthIndex           string    `json:"auth_index,omitempty"`

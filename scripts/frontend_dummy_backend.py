@@ -846,6 +846,14 @@ EVENT_SAMPLES = SUCCESS_EVENT_SAMPLES * 2 + FAILURE_EVENT_SAMPLES + UNASSIGNED_E
 
 def make_request_events():
     entries = []
+    request_variants = [
+        {"endpoint": "/v1/chat/completions", "transport": "http", "stream": True},
+        {"endpoint": "/v1/responses", "transport": "websocket", "stream": True},
+        {"endpoint": "/v1/messages", "transport": "http", "stream": False},
+        {},
+        {"endpoint": "/v1/responses", "transport": "http", "stream": True},
+        {"endpoint": "/v1/responses", "transport": "http"},
+    ]
     for index, sample in enumerate(EVENT_SAMPLES):
         key = {"scope": "", "preview": "", "label": ""} if sample["key_index"] is None else KEYS[sample["key_index"]]
         entries.append({
@@ -855,6 +863,7 @@ def make_request_events():
             "preview": key["preview"],
             "label": key["label"],
             **{name: value for name, value in sample.items() if name != "key_index"},
+            **request_variants[index % len(request_variants)],
         })
     return entries
 

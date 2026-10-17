@@ -11,7 +11,7 @@ import (
 	"cpa-key-billing/internal/billing"
 )
 
-func migrateToV17(tx *sql.Tx, version int) error {
+func migrateSchema(tx *sql.Tx, version int) error {
 	var steps []func(*sql.Tx) error
 	switch version {
 	case 10:
@@ -31,11 +31,25 @@ func migrateToV17(tx *sql.Tx, version int) error {
 	if version <= 15 {
 		steps = append(steps, migrateRequestErrorReason)
 	}
-	steps = append(steps, migrateUpstreamResponseReports)
+	if version <= 16 {
+		steps = append(steps, migrateUpstreamResponseReports)
+	}
+	steps = append(steps, migrateRequestInfo)
 	for _, step := range steps {
 		if err := step(tx); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// Historical events have no client origin or reported streaming mode.
+func migrateRequestInfo(tx *sql.Tx) error {
+	if _, err := tx.Exec(`
+		ALTER TABLE request_events ADD COLUMN endpoint TEXT NOT NULL DEFAULT '';
+		ALTER TABLE request_events ADD COLUMN transport TEXT NOT NULL DEFAULT '';
+		ALTER TABLE request_events ADD COLUMN stream INTEGER;`); err != nil {
+		return fmt.Errorf("Add request event client metadata: %w", err)
 	}
 	return nil
 }

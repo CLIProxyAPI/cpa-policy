@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"container/list"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -14,6 +15,8 @@ import (
 type App struct {
 	store                 *billing.Store
 	hostCaller            HostCaller
+	requestOrigins        map[requestOriginKey]*list.Element
+	requestOriginOrder    list.List
 	admissionsMu          sync.Mutex
 	admissions            map[string]*requestAdmission
 	routingMu             sync.Mutex
@@ -36,6 +39,7 @@ func NewApp() *App {
 func newApp(store *billing.Store) *App {
 	return &App{
 		store:                 store,
+		requestOrigins:        make(map[requestOriginKey]*list.Element),
 		admissions:            make(map[string]*requestAdmission),
 		credentials:           make(map[string]credentialView),
 		credentialsByRawID:    make(map[string]string),

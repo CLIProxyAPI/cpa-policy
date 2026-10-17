@@ -16,6 +16,7 @@
   "ui.sign_out": "退出登录",
   "ui.analysis": "分析",
   "ui.request_events": "请求事件",
+  "ui.request": "请求",
   "ui.error_events": "错误事件",
   "ui.auth_files": "认证文件",
   "ui.auth_file_routing": "优先级：{priority} · 权重：{weight}",

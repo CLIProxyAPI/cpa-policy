@@ -37,8 +37,9 @@ func appendRequestEvent(tx *sql.Tx, entry billing.RequestEvent) (int64, error) {
 			uncached_input_tokens, cache_read_tokens, cache_write_tokens, billed_output_tokens,
 			tiered, long_context, threshold_input_tokens,
 			applied_input_per_1m, applied_output_per_1m,
-			applied_cache_read_per_1m, applied_cache_write_per_1m, response_headers_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			applied_cache_read_per_1m, applied_cache_write_per_1m, response_headers_json,
+			endpoint, transport, stream
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nanos(entry.At), entry.Scope, entry.AuthIndex, entry.Provider, entry.Account, entry.ExecutorType, entry.ReasoningEffort, entry.ServiceTier,
 		entry.ResponseServiceTier, entry.UpstreamModel, entry.ResponseModel, entry.BillingModel, entry.Failed,
 		entry.LatencyMS, entry.TTFTMS,
@@ -49,7 +50,8 @@ func appendRequestEvent(tx *sql.Tx, entry billing.RequestEvent) (int64, error) {
 		entry.Cost.CacheWriteTokens, entry.Cost.BilledOutputTokens,
 		entry.Cost.Tiered, entry.Cost.LongContext, entry.Cost.ThresholdInputTokens,
 		entry.Cost.AppliedInputPer1M, entry.Cost.AppliedOutputPer1M,
-		entry.Cost.AppliedCacheReadPer1M, entry.Cost.AppliedCacheWritePer1M, headers)
+		entry.Cost.AppliedCacheReadPer1M, entry.Cost.AppliedCacheWritePer1M, headers,
+		entry.Endpoint, entry.Transport, entry.Stream)
 	if errInsert != nil {
 		return 0, fmt.Errorf("Write request event: %w", errInsert)
 	}
@@ -149,7 +151,7 @@ func (d *DB) RequestEvents(query billing.RequestEventQuery, since time.Time) (bi
 			r.applied_input_per_1m, r.applied_output_per_1m,
 			r.applied_cache_read_per_1m, r.applied_cache_write_per_1m,
 			coalesce(k.preview, ''), coalesce(k.label, ''), `+requestEventSourceName+`,
-			coalesce(e.body, '')
+			coalesce(e.body, ''), r.endpoint, r.transport, r.stream
 		FROM page JOIN request_events r ON r.id = page.id
 		LEFT JOIN api_keys k ON k.scope = r.scope
 		LEFT JOIN request_errors e ON e.request_event_id = r.id
@@ -271,7 +273,7 @@ func scanRequestEventRow(rows *sql.Rows) (billing.RequestEventRow, error) {
 		&row.Cost.Tiered, &row.Cost.LongContext, &row.Cost.ThresholdInputTokens,
 		&row.Cost.AppliedInputPer1M, &row.Cost.AppliedOutputPer1M,
 		&row.Cost.AppliedCacheReadPer1M, &row.Cost.AppliedCacheWritePer1M,
-		&row.Preview, &row.Label, &row.Source, &row.ErrorBody); errScan != nil {
+		&row.Preview, &row.Label, &row.Source, &row.ErrorBody, &row.Endpoint, &row.Transport, &row.Stream); errScan != nil {
 		return billing.RequestEventRow{}, fmt.Errorf("Read request events: %w", errScan)
 	}
 	row.At = timeAt(at)

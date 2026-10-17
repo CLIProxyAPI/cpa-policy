@@ -247,3 +247,51 @@ func TestInterceptEnforcesQuotaDimensionsAfterRestart(t *testing.T) {
 		t.Fatalf("restart did not preserve exhaustion: %+v", response)
 	}
 }
+
+func TestRequestOriginsRespectScopeAndCapacity(t *testing.T) {
+	app := newApp(nil)
+	var group sync.WaitGroup
+	for worker := range 8 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for i := worker; i < maxRequestOrigins; i += 8 {
+				trace, endpoint := fmt.Sprint(i), fmt.Sprintf("/endpoint/%d", i)
+				app.rememberRequestOrigin(RequestInterceptRequest{TraceID: trace}, "scope", endpoint)
+				if got := app.findRequestOrigin(trace, "scope"); got.endpoint != endpoint {
+					t.Errorf("concurrent origin crossed traces: %+v", got)
+				}
+			}
+		}()
+	}
+	group.Wait()
+	keep := app.requestOriginOrder.Back().Value.(*requestOrigin).key
+	app.findRequestOrigin(keep.traceID, keep.scope)
+	evicted := app.requestOriginOrder.Back().Value.(*requestOrigin).key
+	app.rememberRequestOrigin(RequestInterceptRequest{TraceID: "new-trace"}, "scope", "/v1/messages")
+	if len(app.requestOrigins) != maxRequestOrigins || app.findRequestOrigin(evicted.traceID, evicted.scope).endpoint != "" ||
+		app.findRequestOrigin(keep.traceID, keep.scope).endpoint == "" {
+		t.Fatal("origin retention did not evict the least recently used trace")
+	}
+
+	for _, test := range []struct{ scope, path string }{
+		{"scope-a", "/v1/responses"}, {"scope-b", "/v1/messages?key=dummy-secret"},
+	} {
+		app.rememberRequestOrigin(RequestInterceptRequest{TraceID: "shared"}, test.scope, test.path)
+	}
+	if got := app.findRequestOrigin("shared", "scope-b"); got.endpoint != "/v1/messages" || got.transport != "http" {
+		t.Fatalf("incorrect scoped origin: %+v", got)
+	}
+	if got := app.findRequestOrigin("shared", "scope-a"); got.endpoint != "/v1/responses" {
+		t.Fatalf("origin crossed caller scopes: %+v", got)
+	}
+	for _, endpoint := range []string{"/v1/messages", "/v1/responses"} {
+		app.rememberRequestOrigin(RequestInterceptRequest{TraceID: "shared"}, "scope-a", endpoint)
+		if got := app.findRequestOrigin("shared", "scope-a"); got.endpoint != "" || got.transport != "" {
+			t.Fatalf("conflicting trace ID was guessed: %+v", got)
+		}
+	}
+	if got := app.findRequestOrigin("missing", "scope-a"); got.endpoint != "" || got.transport != "" {
+		t.Fatalf("missing trace ID was guessed: %+v", got)
+	}
+}

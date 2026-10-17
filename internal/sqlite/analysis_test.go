@@ -99,7 +99,7 @@ func TestAnalysisScopeSkipsTheRedundantKeyDimension(t *testing.T) {
 	}
 }
 
-func TestAnalysisSummaryIncludesTokenAndCostBreakdowns(t *testing.T) {
+func TestAnalysisIncludesTokenAndCostBreakdowns(t *testing.T) {
 	database := openTestDB(t)
 	state := billing.NewState()
 	state.Keys["scope-a"] = &billing.KeyState{Preview: "sk-tes…0001"}
@@ -115,22 +115,26 @@ func TestAnalysisSummaryIncludesTokenAndCostBreakdowns(t *testing.T) {
 		CacheWriteTokens:    50,
 		BilledOutputTokens:  50,
 	}
+	failed := requestEvent("scope-a", eventStart.Add(75*time.Minute))
+	failed.Cost = billing.Cost{UncachedInputTokens: 400, CacheReadTokens: 100, BilledOutputTokens: 100}
+	zeroInput := requestEvent("scope-b", eventStart)
+	zeroInput.BillingModel, zeroInput.Account = "output-only", "zero@example.com"
+	zeroInput.Cost = billing.Cost{BilledOutputTokens: 40}
+	outside := requestEvent("scope-a", eventStart.Add(2*time.Hour))
 	mustSave(t, database, state, billing.Changes{
-		AllKeys:             true,
-		NormalRequestEvents: []billing.RequestEvent{event},
+		AllKeys: true, NormalRequestEvents: []billing.RequestEvent{event, zeroInput, outside},
+		RequestErrorEvents: []billing.RequestErrorEvent{{Event: failed}},
 	})
 
-	view, err := database.Analysis(billing.RequestEventQuery{
-		From: eventStart.Add(-time.Minute),
-		To:   eventStart.Add(time.Minute),
-	}, eventStart.Add(-billing.RequestEventRetention))
+	query := billing.RequestEventQuery{From: eventStart, To: eventStart.Add(2 * time.Hour)}
+	view, err := database.Analysis(query, eventStart)
 	if err != nil {
 		t.Fatal(err)
 	}
 	summary := view.Summary
-	if summary.TotalTokens != 500 || summary.InputTokens != 450 || summary.OutputTokens != 50 ||
-		summary.CacheReadTokens != 300 || summary.CacheWriteTokens != 50 ||
-		math.Abs(summary.CacheRate-200.0/3) > 1e-9 {
+	if summary.Requests != 3 || summary.Failed != 1 || summary.TotalTokens != 1140 || summary.InputTokens != 950 || summary.OutputTokens != 190 ||
+		summary.CacheReadTokens != 400 || summary.CacheWriteTokens != 50 ||
+		math.Abs(summary.CacheRate-800.0/19) > 1e-9 {
 		t.Fatalf("token summary = %+v", summary)
 	}
 	if summary.Cost.TotalUSD != 5 || summary.Cost.InputUSD != 1 ||
@@ -139,32 +143,10 @@ func TestAnalysisSummaryIncludesTokenAndCostBreakdowns(t *testing.T) {
 		t.Fatalf("cost summary = %+v", summary.Cost)
 	}
 	trends := view.Trends
-	if len(trends.UncachedInputTokens) != 1 || trends.UncachedInputTokens[0].Value != 100 ||
-		trends.OutputTokens[0].Value != 50 || trends.CacheReadTokens[0].Value != 300 ||
-		trends.CacheWriteTokens[0].Value != 50 || trends.TotalTokens[0].Value != 500 {
+	if len(trends.UncachedInputTokens) != 2 || trends.UncachedInputTokens[0].Value != 100 ||
+		trends.OutputTokens[0].Value != 90 || trends.CacheReadTokens[0].Value != 300 ||
+		trends.CacheWriteTokens[0].Value != 50 || trends.TotalTokens[0].Value != 540 || trends.TotalTokens[1].Value != 600 {
 		t.Fatalf("token trends = %+v", trends)
-	}
-}
-
-func TestAnalysisDistributionIncludesTokenBreakdownsAcrossBuckets(t *testing.T) {
-	database := openTestDB(t)
-	first := requestEvent("scope-a", eventStart)
-	first.Cost = billing.Cost{UncachedInputTokens: 100, CacheReadTokens: 300, CacheWriteTokens: 50, BilledOutputTokens: 50}
-	failed := requestEvent("scope-a", eventStart.Add(75*time.Minute))
-	failed.Cost = billing.Cost{UncachedInputTokens: 400, CacheReadTokens: 100, BilledOutputTokens: 100}
-	zeroInput := requestEvent("scope-b", eventStart)
-	zeroInput.BillingModel, zeroInput.Account = "output-only", "zero@example.com"
-	zeroInput.Cost = billing.Cost{BilledOutputTokens: 40}
-	outside := requestEvent("scope-a", eventStart.Add(2*time.Hour))
-	mustSave(t, database, billing.NewState(), billing.Changes{
-		NormalRequestEvents: []billing.RequestEvent{first, zeroInput, outside},
-		RequestErrorEvents:  []billing.RequestErrorEvent{{Event: failed}},
-	})
-
-	query := billing.RequestEventQuery{From: eventStart, To: eventStart.Add(2 * time.Hour)}
-	view, err := database.Analysis(query, eventStart)
-	if err != nil {
-		t.Fatal(err)
 	}
 	for name, rows := range map[string][]billing.AnalysisComposition{
 		"keys": view.UsageDistribution.APIKeys, "models": view.UsageDistribution.Models, "sources": view.UsageDistribution.Sources,

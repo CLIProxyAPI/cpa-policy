@@ -131,6 +131,8 @@ type RequestCompletion struct {
 
 type RequestInterceptRequest struct {
 	RequestID      string         `json:"RequestID"`
+	TraceID        string         `json:"TraceID"`
+	Headers        http.Header    `json:"Headers"`
 	SourceFormat   string         `json:"SourceFormat"`
 	Model          string         `json:"Model"`
 	RequestedModel string         `json:"RequestedModel"`
@@ -145,6 +147,7 @@ type RequestInterceptResponse struct {
 }
 
 type UsageRecord struct {
+	TraceID             string        `json:"TraceID"`
 	Provider            string        `json:"Provider"`
 	ExecutorType        string        `json:"ExecutorType"`
 	Model               string        `json:"Model"`
@@ -159,6 +162,7 @@ type UsageRecord struct {
 	ResponseModel       string        `json:"ResponseModel"`
 	ResponseHeaders     http.Header   `json:"ResponseHeaders"`
 	Generate            bool          `json:"Generate"`
+	Stream              *bool         `json:"Stream"`
 	RequestedAt         time.Time     `json:"RequestedAt"`
 	Latency             time.Duration `json:"Latency"`
 	TTFT                time.Duration `json:"TTFT"`

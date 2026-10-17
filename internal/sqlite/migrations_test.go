@@ -513,8 +513,8 @@ func TestV12QuotaWindowsMigrationAndRollback(t *testing.T) {
 	}
 }
 
-func TestResponseHeadersMigrationAndRollback(t *testing.T) {
-	for _, version := range []int{12, 13, 14} {
+func TestRequestEventMetadataMigrationAndRollback(t *testing.T) {
+	for _, version := range []int{12, 13, 14, 15, 16, 17} {
 		for _, conflict := range []bool{false, true} {
 			t.Run(fmt.Sprintf("v%d/conflict=%v", version, conflict), func(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "legacy.db")
@@ -528,16 +528,19 @@ func TestResponseHeadersMigrationAndRollback(t *testing.T) {
 				}
 				fixture := &DB{db: raw}
 				if err := fixture.transact(func(tx *sql.Tx) error {
-					if version >= 13 {
-						if err := migrateModelPricing(tx); err != nil {
-							return err
+					for _, step := range []struct {
+						version int
+						apply   func(*sql.Tx) error
+					}{
+						{13, migrateModelPricing}, {13, migrateQuotaWindows},
+						{14, migrateCredentials}, {15, migrateResponseHeaders},
+						{16, migrateRequestErrorReason}, {17, migrateUpstreamResponseReports},
+					} {
+						if version >= step.version {
+							if err := step.apply(tx); err != nil {
+								return err
+							}
 						}
-						if err := migrateQuotaWindows(tx); err != nil {
-							return err
-						}
-					}
-					if version >= 14 {
-						return migrateCredentials(tx)
 					}
 					return nil
 				}); err != nil {
@@ -549,7 +552,7 @@ func TestResponseHeadersMigrationAndRollback(t *testing.T) {
 					INSERT INTO request_errors(request_event_id,status_code,body) VALUES(2,502,'preserved failure');`); err != nil {
 					t.Fatal(err)
 				}
-				if version == 14 {
+				if version >= 14 {
 					if _, err := raw.Exec(`CREATE TRIGGER reject_update BEFORE UPDATE ON request_events BEGIN SELECT RAISE(ABORT,'history rewritten'); END;
 						CREATE TRIGGER reject_delete BEFORE DELETE ON request_events BEGIN SELECT RAISE(ABORT,'history deleted'); END;`); err != nil {
 						t.Fatal(err)
@@ -587,6 +590,11 @@ func TestResponseHeadersMigrationAndRollback(t *testing.T) {
 					view, err := database.RequestEvents(billing.RequestEventQuery{}, time.Time{})
 					if err != nil || view.Total != 3 || view.Statuses.Failed != 1 {
 						t.Fatalf("migrated view = %+v, err = %v", view, err)
+					}
+					for _, entry := range view.Entries {
+						if entry.Endpoint != "" || entry.Transport != "" || entry.Stream != nil {
+							t.Fatalf("historical request metadata was invented: %+v", entry)
+						}
 					}
 				}
 				var gotVersion, events, failures int

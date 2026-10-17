@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,83 @@ func (a *App) endAdmission(requestID string, admission *requestAdmission) {
 	}
 }
 
+const maxRequestOrigins = 16384
+
+type requestOriginKey struct {
+	traceID, scope string
+}
+
+type requestOrigin struct {
+	key                 requestOriginKey
+	endpoint, transport string
+}
+
+// Retain origins after request.complete: usage is asynchronous and retries or
+// WebSocket turns can report more than one record for the same inbound trace.
+// Admission bookkeeping and origins share the existing request-state lock.
+func (a *App) rememberRequestOrigin(req RequestInterceptRequest, scope, endpoint string) {
+	key := requestOriginKey{strings.TrimSpace(req.TraceID), scope}
+	endpoint = requestEndpoint(endpoint)
+	if key.traceID == "" || endpoint == "" {
+		return
+	}
+	transport := "http"
+	if headerHasToken(req.Headers, "Connection", "upgrade") && headerHasToken(req.Headers, "Upgrade", "websocket") {
+		transport = "websocket"
+	}
+	a.admissionsMu.Lock()
+	defer a.admissionsMu.Unlock()
+	if entry := a.requestOrigins[key]; entry != nil {
+		origin := entry.Value.(*requestOrigin)
+		if origin.endpoint != endpoint || origin.transport != transport {
+			// Conflicting metadata stays unknown for the retained trace.
+			origin.endpoint, origin.transport = "", ""
+		}
+		a.requestOriginOrder.MoveToFront(entry)
+		return
+	}
+	a.requestOrigins[key] = a.requestOriginOrder.PushFront(&requestOrigin{key: key, endpoint: endpoint, transport: transport})
+	if len(a.requestOrigins) > maxRequestOrigins {
+		oldest := a.requestOriginOrder.Back()
+		delete(a.requestOrigins, oldest.Value.(*requestOrigin).key)
+		a.requestOriginOrder.Remove(oldest)
+	}
+}
+
+func (a *App) findRequestOrigin(traceID, scope string) requestOrigin {
+	a.admissionsMu.Lock()
+	defer a.admissionsMu.Unlock()
+	entry := a.requestOrigins[requestOriginKey{strings.TrimSpace(traceID), scope}]
+	if entry == nil {
+		return requestOrigin{}
+	}
+	a.requestOriginOrder.MoveToFront(entry)
+	return *entry.Value.(*requestOrigin)
+}
+
+func requestEndpoint(raw string) string {
+	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || len(raw) > 4096 {
+		return ""
+	}
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return ""
+	}
+	// Persist only the route path, never query parameters or headers.
+	return parsed.EscapedPath()
+}
+
+func headerHasToken(headers http.Header, name, token string) bool {
+	for _, value := range headers.Values(name) {
+		for _, part := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Enforcement runs before auth so an over-quota request never occupies an
 // upstream credential.
 func (a *App) interceptBeforeAuth(raw []byte) ([]byte, error) {
@@ -74,6 +152,7 @@ func (a *App) interceptBeforeAuth(raw []byte) ([]byte, error) {
 
 	// Reject disallowed models before quota checks can open a subscription period.
 	if !helper {
+		a.rememberRequestOrigin(req, scope, endpoint)
 		routing := a.store.ResolveRouting(scope, req.Model, req.RequestedModel)
 		a.beginRouteLog(req.RequestID, scope, routing)
 		if routing.ConfigurationError != "" {
@@ -188,7 +267,11 @@ func (a *App) handleUsage(raw []byte) ([]byte, error) {
 		recordError = usageFailureDetails(record.Failure)
 	}
 	at := a.store.Now()
+	origin := a.findRequestOrigin(record.TraceID, scope)
 	event := billing.UsageEvent{
+		Endpoint:            origin.endpoint,
+		Transport:           origin.transport,
+		Stream:              record.Stream,
 		Scope:               scope,
 		KeyPreview:          billing.PreviewKey(record.APIKey),
 		AuthIndex:           record.AuthIndex,

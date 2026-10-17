@@ -1874,7 +1874,7 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   box-shadow: 0 1px 0 var(--border-color);
 }
 .request-event-cell-line { display: flex; align-items: center; gap: 4px; min-height: 20px; white-space: nowrap; }
-.request-event-source { min-height: 20px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-event-detail { min-height: 20px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cost-value { display: inline-block; cursor: help; text-decoration: underline dotted var(--text-tertiary); text-underline-offset: 3px; }
 .hover-tooltip:has(.cost-tooltip-grid) { max-width: min(480px, calc(100vw - 24px)); }
 .cost-tooltip-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }

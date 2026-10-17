@@ -8,6 +8,9 @@ const EVENT_CSV_COLUMNS = {
     "billing_model",
     "upstream_model",
     "executor_type",
+    "endpoint",
+    "transport",
+    "stream",
     "source",
     "reasoning_effort",
     "service_tier",
@@ -244,6 +247,10 @@ function renderRequestEvents(account = false) {
     const mismatchedModel = entry.response_model && entry.response_model !== entry.upstream_model ? entry.response_model : "";
     const mismatchLabel = m("ui.upstream_served_a_model_other_than_the_one_requested");
     const serviceTiers = [entry.service_tier, entry.response_service_tier].filter(Boolean).join("\u2009/\u2009") || "—";
+    const requestType =
+      entry.transport === "websocket"
+        ? "WS"
+        : entry.transport === "http" && typeof entry.stream === "boolean" ? entry.stream ? "SSE" : "HTTP" : "—";
     const modelNote = mismatchedModel
       ? el(
           "div",
@@ -275,7 +282,7 @@ function renderRequestEvents(account = false) {
         el("div", { class: "request-event-cell-line mono" }, entry.executor_type || m("ui.unknown_executor")),
         el(
           "div",
-          { class: "request-event-source muted", "data-tip": displayLabel(entry.source) || null, "data-tip-overflow": "" },
+          { class: "request-event-detail muted", "data-tip": displayLabel(entry.source) || null, "data-tip-overflow": "" },
           entry.source ? maskedLabelText(entry.source) : m("ui.unknown_source")
         )
       ),
@@ -284,6 +291,12 @@ function renderRequestEvents(account = false) {
         { class: "small" },
         el("div", { class: "request-event-cell-line mono" }, entry.reasoning_effort || "—"),
         el("div", { class: "request-event-cell-line muted" }, serviceTiers)
+      ),
+      el(
+        "td",
+        { class: "small request-event-request" },
+        el("div", { class: "request-event-cell-line mono", text: requestType }),
+        el("div", { class: "request-event-detail muted mono", text: entry.endpoint || "—" })
       ),
       el("td", {}, failureTag(entry)),
       el(
@@ -347,6 +360,7 @@ function renderRequestEvents(account = false) {
       m("ui.model"),
       m("ui.executor_source"),
       m("ui.reasoning_speed"),
+      m("ui.request"),
       m("ui.result"),
       { label: m("ui.tps_latency"), num: true },
       { label: m("ui.input"), num: true },

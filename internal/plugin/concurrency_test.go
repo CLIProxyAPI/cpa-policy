@@ -22,7 +22,7 @@ func concurrencyApp(t *testing.T, limit int) *App {
 func interceptWithID(t *testing.T, app *App, requestID string, generate bool) RequestInterceptResponse {
 	t.Helper()
 	raw, errHandle := app.HandleMethod(MethodRequestInterceptBefore, mustMarshal(t, RequestInterceptRequest{
-		RequestID: requestID, SourceFormat: "openai", Model: flowModel, RequestedModel: flowModel,
+		RequestID: requestID, TraceID: requestID, SourceFormat: "openai", Model: flowModel, RequestedModel: flowModel,
 		Metadata: map[string]any{
 			MetadataCallerScope: flowScope(), MetadataRequestPath: "/v1/responses", MetadataGenerate: generate,
 		},
