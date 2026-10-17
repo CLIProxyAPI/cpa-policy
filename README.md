@@ -81,6 +81,7 @@ plugins:
   configs:
     cpa-key-billing:
       enabled: true
+      priority: 100 # 插件调度优先级，数值越大越优先
       debug: false # 是否记录 debug 日志，例如路由日志、匹配参考价日志
       codex_fast_mode_billing: false # 开启后，Codex 的 priority 请求按 2.5 倍计费
       mask_api_key_view_emails: false # 对 API Key 查询页面返回的邮箱进行掩码脱敏
@@ -93,6 +94,8 @@ plugins:
 ```
 
 路由规则对上游凭证设有限制时，插件按上述 `routing` 配置调度；其他请求由 CPA 调度。插件配置与 CPA 的全局调度配置相互独立。
+
+CPA 按插件优先级选择调度插件，不会依次调用。建议显式设置 `priority: 100`，使本插件优先参与调度；省略时使用 CPA 的默认值 `0`。无论由谁调度，所选凭证都必须符合 API Key 的路由规则；凭证不符合规则或无法完成校验时，请求返回 `503`，原因记录在插件日志中。
 
 首次调度或会话绑定失效时，插件按配置的策略，从优先级最高的可用凭证中选择。启用会话粘性后，同一会话优先复用已绑定的凭证；凭证不可用或会话空闲时间超过 `session-affinity-ttl` 后，重新选择凭证。会话标识由 CPA 提供，没有会话标识的请求按常规策略调度。
 
@@ -161,6 +164,8 @@ flowchart TB
 | 订阅额度用尽 | `429` | `rate_limit_error` | `rate_limit_exceeded` |
 | 模型无权访问 | `403` | `permission_error` | `insufficient_quota` |
 | 没有符合规则且可用的凭证 | `503` | `server_error` | `internal_server_error` |
+| 选中的凭证不符合路由规则 | `503` | `server_error` | `routing_credential_mismatch` |
+| 无法校验所选凭证的路由权限 | `503` | `server_error` | `routing_credential_unverified` |
 | 已绑定的路由规则不存在或损坏 | `503` | `server_error` | `routing_configuration_error` |
 | 模型未定价 | `503` | `cpa_key_billing_error` | `model_price_error` |
 

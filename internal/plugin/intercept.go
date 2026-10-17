@@ -156,7 +156,7 @@ func (a *App) interceptBeforeAuth(raw []byte) ([]byte, error) {
 		routing := a.store.ResolveRouting(scope, req.Model, req.RequestedModel)
 		a.beginRouteLog(req.RequestID, scope, routing)
 		if routing.ConfigurationError != "" {
-			return OKEnvelope(routingConfigurationResponse(req.SourceFormat, routing.ConfigurationError))
+			return OKEnvelope(routingErrorResponse(req.SourceFormat, "routing_configuration_error", routing.ConfigurationError))
 		}
 		if routing.RestrictsModels() && !routing.AllowsModel() {
 			return OKEnvelope(modelForbiddenResponse(req.SourceFormat, routing))
@@ -220,14 +220,36 @@ func (a *App) interceptAfterAuth(raw []byte) ([]byte, error) {
 	if errUnmarshal := json.Unmarshal(raw, &req); errUnmarshal != nil {
 		return nil, fmt.Errorf("Parse post-auth request interception parameters: %w", errUnmarshal)
 	}
-	if a != nil {
-		a.observeRouteCredential(
-			req.RequestID,
-			metadataString(req.Metadata, MetadataSelectedAuth),
-			metadataString(req.Metadata, MetadataSelectedIndex),
-		)
+	if a == nil || a.store == nil {
+		return OKEnvelope(RequestInterceptResponse{})
 	}
-	return OKEnvelope(RequestInterceptResponse{})
+	result, detail := "unrestricted", ""
+	var response RequestInterceptResponse
+	if a.store.Enabled() && metadataString(req.Metadata, MetadataSource) != SourcePluginHostModelCallback {
+		// Credential permissions are independent of model aliases. Recheck the
+		// current policy even when another scheduler made the selection.
+		scope := metadataString(req.Metadata, MetadataCallerScope)
+		decision := a.store.ResolveRouting(scope, req.Model, req.RequestedModel)
+		a.beginRouteLog(req.RequestID, scope, decision)
+		if decision.ConfigurationError != "" {
+			result, detail = "configuration_error", decision.ConfigurationError
+			response = routingErrorResponse(req.SourceFormat, "routing_configuration_error", detail)
+		} else if decision.RestrictsCredentials() {
+			allowed, err := a.selectedCredentialAllowed(req, decision)
+			switch {
+			case err != nil:
+				result, detail = "unverified", err.Error()
+				response = routingErrorResponse(req.SourceFormat, "routing_credential_unverified", detail)
+			case !allowed:
+				result, detail = "deny", "The selected upstream credential is not permitted by this API key's routing rules"
+				response = routingErrorResponse(req.SourceFormat, "routing_credential_mismatch", detail)
+			default:
+				result = "allow"
+			}
+		}
+	}
+	a.observeRouteCredential(req, result, detail)
+	return OKEnvelope(response)
 }
 
 func (a *App) completeRequest(raw []byte) ([]byte, error) {
@@ -249,8 +271,8 @@ func (a *App) completeRequest(raw []byte) ([]byte, error) {
 	return OKEnvelope(struct{}{})
 }
 
-func routingConfigurationResponse(sourceFormat, message string) RequestInterceptResponse {
-	return RequestInterceptResponse{Terminate: true, StatusCode: http.StatusServiceUnavailable, ResponseHeaders: http.Header{"Content-Type": []string{"application/json; charset=utf-8"}}, ResponseBody: refusalBody(sourceFormat, refusal{anthropicType: "api_error", openaiType: "server_error", openaiCode: "routing_configuration_error"}, message)}
+func routingErrorResponse(sourceFormat, code, message string) RequestInterceptResponse {
+	return RequestInterceptResponse{Terminate: true, StatusCode: http.StatusServiceUnavailable, ResponseHeaders: http.Header{"Content-Type": []string{"application/json; charset=utf-8"}}, ResponseBody: refusalBody(sourceFormat, refusal{anthropicType: "api_error", openaiType: "server_error", openaiCode: code}, message)}
 }
 
 func (a *App) handleUsage(raw []byte) ([]byte, error) {

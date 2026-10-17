@@ -87,6 +87,7 @@ plugins:
   configs:
     cpa-key-billing:
       enabled: true
+      priority: 100 # Plugin scheduling priority; higher values take precedence
       debug: false # Include routing and reference-price matching in debug logs
       codex_fast_mode_billing: false # Charge 2.5× for Codex priority requests
       mask_api_key_view_emails: false # Mask email addresses in API key account views
@@ -99,6 +100,8 @@ plugins:
 ```
 
 For requests with upstream credential restrictions, the plugin selects from the allowed credentials using the `routing` configuration above. Requests without upstream credential restrictions are handed to CPA for scheduling. The plugin's scheduling configuration is independent of CPA's global `routing` configuration.
+
+CPA selects one scheduling plugin by priority rather than calling them in sequence. Set `priority: 100` to give this plugin precedence; omitting it uses CPA's default of `0`. The selected credential must satisfy the API key's routing rules regardless of which scheduler selected it. Requests return `503` if the credential violates those rules or its permissions cannot be verified, with the reason recorded in the plugin logs.
 
 For initial selections or invalid session bindings, the plugin uses the highest available priority tier, then applies the selected strategy. With session affinity enabled, the same session reuses its bound credential while it remains available. Bindings expire after the idle period specified by `session-affinity-ttl`. Affinity requires a session identity supplied by CPA; requests without one follow the selected strategy.
 
@@ -171,6 +174,8 @@ flowchart TB
 | Subscription quota exhausted | `429` | `rate_limit_error` | `rate_limit_exceeded` |
 | Model access denied | `403` | `permission_error` | `insufficient_quota` |
 | No available credential matches the routing rules | `503` | `server_error` | `internal_server_error` |
+| The selected credential violates the routing rules | `503` | `server_error` | `routing_credential_mismatch` |
+| The selected credential's routing permissions cannot be verified | `503` | `server_error` | `routing_credential_unverified` |
 | A bound routing rule is missing or invalid | `503` | `server_error` | `routing_configuration_error` |
 | Model has no price | `503` | `cpa_key_billing_error` | `model_price_error` |
 

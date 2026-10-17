@@ -83,19 +83,23 @@ function renderPluginLogMessage(pluginLog) {
     const model =
       row.model_result === "deny"
         ? m("ui.denied")
-        : row.model_result === "configuration_error" ? m("ui.configuration_error") : m("ui.allowed");
+        : row.model_result === "configuration_error"
+          ? m("ui.configuration_error")
+          : row.model_result === "allow" ? m("ui.allowed") : m("ui.unknown_2");
+    const check = {
+      allow: { label: m("ui.credential_route_check_passed"), class: "tag ok" },
+      deny: { label: m("ui.credential_route_check_denied"), class: "tag bad" },
+      unverified: { label: m("ui.credential_route_check_unverified"), class: "tag bad" },
+      selected: { label: m("ui.credential_route_check_not_recorded"), class: "tag plain" }
+    }[row.credential_result];
     const credential =
-      row.credential_result === "selected"
-        ? upstreamCredentialText(row.selected_credential)
-        : row.credential_result === "no_match"
-          ? m("ui.upstream_credential_no_available_match")
-          : row.credential_result === "not_reached"
-            ? m("ui.upstream_credential_selection_not_reached")
-            : row.credential_result === "not_observed"
-              ? m("ui.upstream_credential_selection_not_observed")
-              : row.credential_result === "configuration_error"
-                ? m("ui.upstream_credential_configuration_error")
-                : m("ui.upstream_credential_unrestricted");
+      {
+        no_match: m("ui.upstream_credential_no_available_match"),
+        not_reached: m("ui.upstream_credential_selection_not_reached"),
+        not_observed: m("ui.upstream_credential_selection_not_observed"),
+        configuration_error: m("ui.upstream_credential_configuration_error"),
+        unrestricted: m("ui.upstream_credential_unrestricted")
+      }[row.credential_result] || upstreamCredentialText(row.selected_credential);
     const outcome =
       { succeeded: m("ui.succeeded"), failed: m("ui.failed"), rejected: m("ui.rejected"), canceled: m("ui.canceled") }[row.outcome] ||
       row.outcome ||
@@ -104,7 +108,6 @@ function renderPluginLogMessage(pluginLog) {
     return el(
       "details",
       {
-        class: "plugin-log-message",
         open: expandedPluginLogIDs.has(id),
         ontoggle: (event) => {
           if (!event.currentTarget.isConnected) return;
@@ -121,10 +124,11 @@ function renderPluginLogMessage(pluginLog) {
           el("span", {}, m("ui.api_key_value", { v0: "" }), row.key ? maskedText(row.key) : m("ui.unknown_2")),
           el("span", { text: m("ui.model_value_value", { v0: row.model || m("ui.unknown_2"), v1: model }) }),
           el("span", {}, credential),
+          check && el("span", { class: check.class, text: check.label }),
           el("span", { text: m("ui.request_result_value", { v0: outcome }) })
         )
       ),
-      el("pre", {}, routeLogDetails(row))
+      el("pre", { class: "event-error-body mono" }, routeLogDetails(row))
     );
   } catch (_) { return el("div", { class: "plugin-log-message" }, message); }
 }

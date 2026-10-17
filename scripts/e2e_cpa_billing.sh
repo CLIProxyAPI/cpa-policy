@@ -797,11 +797,11 @@ assert_route_credential_policy() {
       ([ $rows[] | select(.status == 200) ] | length) == 2 and
       ([ $rows[] | select(.status == 503 and .credential_result == "no_match") ] | length) == 1 and
       all($rows[] | select(.status == 200);
-        .model_result == "allow" and .credential_policy == "restricted" and .credential_result == "selected" and
+        .model_result == "allow" and .credential_policy == "restricted" and .credential_result == "allow" and
         ((.selected_credential // "") | length) > 0 and
         ((.selected_credential // "") | contains("上游凭证") | not))
     ' "$plugin_logs_file" >/dev/null; then
-    echo "插件日志缺少凭证路由选择结果：$(jq -c '.entries' "$plugin_logs_file")" >&2
+    echo "插件日志缺少凭证路由校验结果：$(jq -c '.entries' "$plugin_logs_file")" >&2
     return 1
   fi
 

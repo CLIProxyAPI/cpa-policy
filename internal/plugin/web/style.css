@@ -958,8 +958,9 @@ body.embedded .standalone-actions { display: none; }
 .account-access-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
 .account-access-scope-label { margin-bottom: 8px; color: var(--text-tertiary); font-size: 11px; font-weight: 600; }
 .account-access-chips { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
-.plugin-log-message summary::-webkit-details-marker { display: none; }
+.details-summary::-webkit-details-marker { display: none; }
 .details-summary { display: flex; align-items: flex-start; gap: 7px; list-style: none; cursor: pointer; }
+.details-summary > .row { min-width: 0; overflow-wrap: anywhere; }
 .details-summary-icon { display: grid; place-items: center; flex: 0 0 14px; height: 1.55em; }
 .details-summary-icon .lucide-chevron-icon { margin: 0; }
 details[open] > .details-summary .lucide-chevron-icon, .routing-section-toggle[aria-expanded="true"] .lucide-chevron-icon {
@@ -1803,6 +1804,7 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
 }
 .event-list { display: grid; gap: 8px; padding: 2px 0 10px; }
 .event-entry {
+  min-width: 0;
   padding: 9px 11px;
   border: 1px solid var(--event-entry-border);
   border-radius: var(--radius-md);

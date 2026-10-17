@@ -50,7 +50,9 @@ func TestProtocolRejectionsUseEnglishWithoutUITranslationMetadata(t *testing.T) 
 			concurrencyLimitResponse(format, billing.SlotDecision{Active: 2, Limit: 2}),
 			quotaExhaustedResponse(format, billing.Decision{PlanName: "Test plan"}, time.Now()),
 			modelForbiddenResponse(format, billing.RoutingDecision{Model: "test-model"}),
-			routingConfigurationResponse(format, "Routing rule no longer exists"),
+			routingErrorResponse(format, "routing_configuration_error", "Routing rule no longer exists"),
+			routingErrorResponse(format, "routing_credential_mismatch", "The selected upstream credential is not permitted by this API key's routing rules"),
+			routingErrorResponse(format, "routing_credential_unverified", "The host did not report the selected upstream credential"),
 			priceRefusal(format, "model_price_error", "Model test-model has no configured price"),
 		}
 		for _, response := range responses {

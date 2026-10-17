@@ -21,7 +21,7 @@ type App struct {
 	admissions            map[string]*requestAdmission
 	routingMu             sync.Mutex
 	credentials           map[string]credentialView
-	credentialsByRawID    map[string]string
+	credentialIdentities  map[string]billing.CredentialProviderSelector
 	credentialRefsByIndex map[string]string
 	scheduler             subsetScheduler
 	pending               map[string]pendingRouteLog
@@ -42,7 +42,7 @@ func newApp(store *billing.Store) *App {
 		requestOrigins:        make(map[requestOriginKey]*list.Element),
 		admissions:            make(map[string]*requestAdmission),
 		credentials:           make(map[string]credentialView),
-		credentialsByRawID:    make(map[string]string),
+		credentialIdentities:  make(map[string]billing.CredentialProviderSelector),
 		credentialRefsByIndex: make(map[string]string),
 		pending:               make(map[string]pendingRouteLog),
 	}

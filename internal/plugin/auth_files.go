@@ -21,6 +21,7 @@ import (
 const (
 	hostAuthList             = "host.auth.list"
 	hostAuthGet              = "host.auth.get"
+	hostAuthGetRuntime       = "host.auth.get_runtime"
 	hostRoutingResetCooldown = "host.routing.reset_cooldown"
 )
 
