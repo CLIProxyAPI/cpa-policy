@@ -92,7 +92,15 @@ plugins:
       mask_api_key_view_emails: false # Mask email addresses in API key account views
       allow_api_key_quota_reset: false # Allow API key users to reset accessible Codex and Claude auth file quotas using upstream resets
       state_file: "plugins/cpa-key-billing-state-v1.db"
+      routing:
+        strategy: "round-robin" # round-robin, weighted-round-robin, fill-first
+        session-affinity: false # Reuse an available upstream credential for the same session
+        session-affinity-ttl: "1h" # Idle timeout for session bindings
 ```
+
+For requests with upstream credential restrictions, the plugin selects from the allowed credentials using the `routing` configuration above. Requests without upstream credential restrictions are handed to CPA for scheduling. The plugin's scheduling configuration is independent of CPA's global `routing` configuration.
+
+For initial selections or invalid session bindings, the plugin uses the highest available priority tier, then applies the selected strategy. With session affinity enabled, the same session reuses its bound credential while it remains available. Bindings expire after the idle period specified by `session-affinity-ttl`. Affinity requires a session identity supplied by CPA; requests without one follow the selected strategy.
 
 > [!WARNING]
 > Back up your data file before upgrading.

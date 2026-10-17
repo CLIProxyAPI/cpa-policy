@@ -10,6 +10,13 @@ func TestDecodeConfigDefaults(t *testing.T) {
 	if !cfg.Enabled || cfg.Debug || cfg.CodexFastModeBilling || cfg.MaskAPIKeyViewEmails || cfg.AllowAPIKeyQuotaReset || cfg.StateFile != DefaultStateFile {
 		t.Fatalf("config = %+v", cfg)
 	}
+	if cfg.Routing != DefaultConfig().Routing {
+		t.Fatalf("routing defaults = %+v", cfg.Routing)
+	}
+	cfg, errDecode = DecodeConfig([]byte("routing:\n  strategy: WRR\n  session-affinity: true\n  session-affinity-ttl: 30m\n"))
+	if errDecode != nil || cfg.Routing.Strategy != "weighted-round-robin" || !cfg.Routing.SessionAffinity || cfg.Routing.SessionAffinityTTL != "30m" {
+		t.Fatalf("routing = %+v, error = %v", cfg.Routing, errDecode)
+	}
 	cfg, errDecode = DecodeConfig([]byte("enabled: true\ndebug: true\ncodex_fast_mode_billing: true\nmask_api_key_view_emails: true\nallow_api_key_quota_reset: true\n"))
 	if errDecode != nil || !cfg.Debug || !cfg.CodexFastModeBilling || !cfg.MaskAPIKeyViewEmails || !cfg.AllowAPIKeyQuotaReset {
 		t.Fatalf("config = %+v, error = %v", cfg, errDecode)
@@ -18,8 +25,12 @@ func TestDecodeConfigDefaults(t *testing.T) {
 
 func TestDecodeConfigRejectsUnknownFieldsAndExtraDocuments(t *testing.T) {
 	for name, raw := range map[string]string{
-		"unknown field":  "enable: true\n",
-		"extra document": "enabled: true\n---\nenabled: false\n",
+		"unknown field":         "enable: true\n",
+		"extra document":        "enabled: true\n---\nenabled: false\n",
+		"unknown strategy":      "routing:\n  strategy: random\n",
+		"unknown routing field": "routing:\n  session-affinity-subagents: true\n",
+		"invalid ttl":           "routing:\n  session-affinity-ttl: tomorrow\n",
+		"zero ttl":              "routing:\n  session-affinity-ttl: 0s\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, errDecode := DecodeConfig([]byte(raw)); errDecode == nil {

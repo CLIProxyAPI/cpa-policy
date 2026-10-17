@@ -126,6 +126,7 @@ func (a *App) configure(raw []byte) error {
 		if err := a.store.Configure(cfg); err != nil {
 			return err
 		}
+		a.scheduler.configure(cfg.Routing, cfg.Enabled)
 		if loaded := a.store.ConfigCredentials(); !maps.Equal(previous, loaded) {
 			a.replaceSyncedCredentials(previous, loaded)
 		}
@@ -149,6 +150,12 @@ func registration() Registration {
 			GitHubRepository: GitHubRepository,
 			Logo:             pluginLogo,
 			ConfigFields: []ConfigField{
+				{
+					Name:        "routing",
+					Default:     defaults.Routing,
+					Type:        "object",
+					Description: "Credential routing: strategy (round-robin, weighted-round-robin, fill-first), session-affinity, and session-affinity-ttl. Applies to credential-restricted routes.",
+				},
 				{
 					Name:        "debug",
 					Default:     defaults.Debug,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,18 +13,26 @@ import (
 const DefaultStateFile = "plugins/cpa-key-billing-state-v1.db"
 
 type Config struct {
-	Enabled               bool   `yaml:"enabled"`
-	Debug                 bool   `yaml:"debug"`
-	StateFile             string `yaml:"state_file"`
-	CodexFastModeBilling  bool   `yaml:"codex_fast_mode_billing"`
-	MaskAPIKeyViewEmails  bool   `yaml:"mask_api_key_view_emails"`
-	AllowAPIKeyQuotaReset bool   `yaml:"allow_api_key_quota_reset"`
+	Enabled               bool          `yaml:"enabled"`
+	Debug                 bool          `yaml:"debug"`
+	StateFile             string        `yaml:"state_file"`
+	CodexFastModeBilling  bool          `yaml:"codex_fast_mode_billing"`
+	MaskAPIKeyViewEmails  bool          `yaml:"mask_api_key_view_emails"`
+	AllowAPIKeyQuotaReset bool          `yaml:"allow_api_key_quota_reset"`
+	Routing               RoutingConfig `yaml:"routing"`
+}
+
+type RoutingConfig struct {
+	Strategy           string `yaml:"strategy" json:"strategy"`
+	SessionAffinity    bool   `yaml:"session-affinity" json:"session-affinity"`
+	SessionAffinityTTL string `yaml:"session-affinity-ttl" json:"session-affinity-ttl"`
 }
 
 func DefaultConfig() Config {
 	return Config{
 		Enabled:   false,
 		StateFile: DefaultStateFile,
+		Routing:   RoutingConfig{Strategy: "round-robin", SessionAffinityTTL: "1h"},
 	}
 }
 
@@ -46,7 +55,7 @@ func DecodeConfig(raw []byte) (Config, error) {
 		}
 		cfg = document.Config
 	}
-	return cfg.normalized(), nil
+	return cfg.normalized()
 }
 
 func (c Config) describe() string {
@@ -56,10 +65,31 @@ func (c Config) describe() string {
 	return "disabled"
 }
 
-func (c Config) normalized() Config {
+func (c Config) normalized() (Config, error) {
 	c.StateFile = strings.TrimSpace(c.StateFile)
 	if c.StateFile == "" {
 		c.StateFile = DefaultStateFile
 	}
-	return c
+	switch strings.ToLower(strings.TrimSpace(c.Routing.Strategy)) {
+	case "", "round-robin", "roundrobin", "rr":
+		c.Routing.Strategy = "round-robin"
+	case "weighted-round-robin", "weightedroundrobin", "wrr":
+		c.Routing.Strategy = "weighted-round-robin"
+	case "fill-first", "fillfirst", "ff":
+		c.Routing.Strategy = "fill-first"
+	default:
+		return Config{}, fmt.Errorf("routing.strategy must be round-robin, weighted-round-robin, or fill-first")
+	}
+	c.Routing.SessionAffinityTTL = strings.TrimSpace(c.Routing.SessionAffinityTTL)
+	if c.Routing.SessionAffinityTTL == "" {
+		c.Routing.SessionAffinityTTL = "1h"
+	}
+	ttl, err := time.ParseDuration(c.Routing.SessionAffinityTTL)
+	if err != nil || ttl <= 0 {
+		return Config{}, fmt.Errorf("routing.session-affinity-ttl must be a positive duration")
+	}
+	if ttl < time.Second {
+		c.Routing.SessionAffinityTTL = "1s"
+	}
+	return c, nil
 }

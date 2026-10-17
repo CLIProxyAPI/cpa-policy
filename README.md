@@ -86,7 +86,15 @@ plugins:
       mask_api_key_view_emails: false # 对 API Key 查询页面返回的邮箱进行掩码脱敏
       allow_api_key_quota_reset: false # 允许 API Key 用户重置可访问的 Codex 和 Claude 认证文件额度，消耗上游重置次数
       state_file: "plugins/cpa-key-billing-state-v1.db"
+      routing:
+        strategy: "round-robin" # round-robin、weighted-round-robin、fill-first
+        session-affinity: false # 同一会话优先复用可用的上游凭证
+        session-affinity-ttl: "1h" # 会话绑定的空闲过期时间
 ```
+
+路由规则对上游凭证设有限制时，插件按上述 `routing` 配置调度；其他请求由 CPA 调度。插件配置与 CPA 的全局调度配置相互独立。
+
+首次调度或会话绑定失效时，插件按配置的策略，从优先级最高的可用凭证中选择。启用会话粘性后，同一会话优先复用已绑定的凭证；凭证不可用或会话空闲时间超过 `session-affinity-ttl` 后，重新选择凭证。会话标识由 CPA 提供，没有会话标识的请求按常规策略调度。
 
 > [!WARNING]
 > 升级前请备份数据文件。

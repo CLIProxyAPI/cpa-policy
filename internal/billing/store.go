@@ -67,7 +67,10 @@ func (s *Store) Now() time.Time {
 // The host invokes Configure on every plugin.reconfigure, so repeated calls
 // must be safe.
 func (s *Store) Configure(cfg Config) error {
-	normalized := cfg.normalized()
+	normalized, err := cfg.normalized()
+	if err != nil {
+		return err
+	}
 	path, err := filepath.Abs(normalized.StateFile)
 	if err != nil {
 		return fmt.Errorf("Resolve billing database path %q: %w", normalized.StateFile, err)

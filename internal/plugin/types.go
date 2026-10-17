@@ -110,8 +110,9 @@ type Capabilities struct {
 }
 
 type SchedulerPickRequest struct {
-	Model   string `json:"Model"`
-	Options struct {
+	Provider string `json:"Provider"`
+	Model    string `json:"Model"`
+	Options  struct {
 		Metadata map[string]any `json:"Metadata"`
 	} `json:"Options"`
 	Candidates []SchedulerAuthCandidate `json:"Candidates"`
