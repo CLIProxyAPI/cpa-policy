@@ -29,6 +29,7 @@ type quotaHeaderWindow struct {
 	seconds     int64
 	usedPercent float64
 	resetAt     int64
+	meter       *quotaMeter
 }
 
 func usageQuotaHeaders(record UsageRecord, fallback time.Time) http.Header {
@@ -68,16 +69,16 @@ func parseQuotaHeaders(provider string, input http.Header, at time.Time) quotaHe
 			additionalActive = additionalActive || active != "" && active == quotaLimitAlias(group)
 		}
 		if !additionalActive {
-			sample.appendCodexWindows(headers, "X-Codex-", "", at)
+			sample.appendCodexWindows(headers, "X-Codex-", codexMainLimit, at)
 		}
 		for _, group := range groups {
 			prefix := "X-Codex-" + group + "-"
-			sample.appendCodexWindows(headers, prefix, headers.Get(prefix+"Limit-Name")+" ", at)
+			sample.appendCodexWindows(headers, prefix, codexAdditionalLimit(headers.Get(prefix+"Limit-Name")), at)
 		}
 		if plan := headers.Get("X-Codex-Plan-Type"); len(plan) <= 40 && codexQuotaGroup.MatchString(plan) {
 			sample.plan = plan
 		}
-		sample.appendCodexWindows(headers, "X-Codex-Code-Review-", "Code Review ", at)
+		sample.appendCodexWindows(headers, "X-Codex-Code-Review-", codexCodeReviewLimit, at)
 		sample.balance = codexCreditBalance(headers.Get("X-Codex-Credits-Balance"))
 		if value := headers.Get("X-Codex-Credits-Unlimited"); value == "true" || value == "false" {
 			unlimited := value == "true"
@@ -93,14 +94,14 @@ func parseQuotaHeaders(provider string, input http.Header, at time.Time) quotaHe
 			if !ok || used < 0 || math.IsInf(used*100, 0) {
 				continue
 			}
-			sample.windows = append(sample.windows, quotaHeaderWindow{prefix: prefix, role: window.role,
-				seconds: window.seconds, usedPercent: used * 100, resetAt: quotaHeaderReset(headers, prefix+window.role+"-", "Reset", at)})
+			sample.windows = append(sample.windows, quotaHeaderWindow{prefix: prefix, role: window.role, seconds: window.seconds,
+				usedPercent: used * 100, resetAt: quotaHeaderReset(headers, prefix+window.role+"-", "Reset", at), meter: claudeUnifiedMeter(window.role)})
 		}
 	}
 	return sample
 }
 
-func (s *quotaHeaderSample) appendCodexWindows(headers http.Header, prefix, labelPrefix string, at time.Time) {
+func (s *quotaHeaderSample) appendCodexWindows(headers http.Header, prefix string, limit codexLimit, at time.Time) {
 	for _, role := range []string{"Primary", "Secondary"} {
 		key := prefix + role + "-"
 		used, ok := finiteQuotaHeader(headers, key+"Used-Percent")
@@ -108,8 +109,8 @@ func (s *quotaHeaderSample) appendCodexWindows(headers http.Header, prefix, labe
 		if !ok || used < 0 || err != nil || minutes <= 0 || minutes > 366*24*60 {
 			continue
 		}
-		s.windows = append(s.windows, quotaHeaderWindow{prefix: prefix, labelPrefix: labelPrefix,
-			role: role, seconds: minutes * 60, usedPercent: used, resetAt: quotaHeaderReset(headers, key, "Reset-At", at)})
+		s.windows = append(s.windows, quotaHeaderWindow{prefix: prefix, labelPrefix: limit.labelPrefix, role: role, seconds: minutes * 60,
+			usedPercent: used, resetAt: quotaHeaderReset(headers, key, "Reset-At", at), meter: limit.meter(role)})
 	}
 }
 
@@ -156,7 +157,7 @@ func (s quotaHeaderSample) quota(at time.Time) authQuotaResponse {
 		windows := []quotaWindow{}
 		for end < len(s.windows) && s.windows[end].prefix == s.windows[start].prefix {
 			window := s.windows[end]
-			value := quotaWindow{Role: window.role, Seconds: window.seconds, RemainingPercent: remainingPercent(100 - window.usedPercent)}
+			value := quotaWindow{Role: window.role, Seconds: window.seconds, RemainingPercent: remainingPercent(100 - window.usedPercent), meter: window.meter}
 			if window.resetAt > 0 {
 				value.ResetAt = time.Unix(window.resetAt, 0).UTC().Format(time.RFC3339)
 			}

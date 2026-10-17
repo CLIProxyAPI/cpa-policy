@@ -84,13 +84,15 @@ function authUI(account) {
     files: authFilesQueries[account ? "account" : "admin"],
     body: $(prefix + "-files-body"),
     enabledOnly: $(prefix + "-enabled-only"),
+    // Account usage covers only the presenting key, so it cannot be projected to the whole window.
+    estimate: account ? null : $("auth-quota-estimate"),
     provider: $(prefix + "-provider"),
     search: $(prefix + "-search"),
     bulk: $(prefix + "-refresh-filtered")
   };
 }
 
-const AUTH_QUOTA_CACHE_PREFIX = "cpa-key-billing.auth-quotas.v5.";
+const AUTH_QUOTA_CACHE_PREFIX = "cpa-key-billing.auth-quotas.v6.";
 
 function resetAuthQuotaMemory(account) {
   const role = account ? "account" : "admin";
@@ -258,22 +260,48 @@ function quotaLabel(row) {
     : group || fullLabel;
 }
 
-function renderQuotaRow(row) {
+// Usage covers the window's current period. An estimate scales it to the whole window by the share already used,
+// so it needs both a used share and recorded usage.
+function renderQuotaUsage(row, estimate) {
+  const usage = row.usage;
+  if (!usage) return null;
+  const used = 100 - row.remaining_percent;
+  const scale = !estimate ? 1 : used > 0 && usage.tokens > 0 ? 100 / used : 0;
+  const total = Math.round(usage.tokens * scale);
+  const metric = (icon, label, value, detail) =>
+    el(
+      "span",
+      { class: "auth-quota-metric", "data-tip": detail },
+      el("span", { role: "img", "aria-label": label }, actionIcon(icon)),
+      value
+    );
+  return el(
+    "span",
+    { class: "auth-quota-metrics", "data-tip": scale ? null : m("ui.quota_estimate_unavailable") },
+    metric("square-text", m("ui.tokens"), scale ? tokens(total) : "—", scale && total >= 1000 ? exactTokens(total) : null),
+    metric("circle-dollar-sign", m("ui.amount"), scale ? usd(usage.cost_usd * scale, 2) : "—")
+  );
+}
+
+function renderQuotaRow(row, estimate) {
   const label = quotaLabel(row);
   const percent = row.remaining_percent;
   const hasPercent = Number.isFinite(percent);
-  const value = hasPercent ? percent.toFixed(0) + "%" : "—";
   const level = percent >= 70 ? "high" : percent >= 30 ? "medium" : "low";
   const reset = quotaResetMeta(row);
-  const amount = quotaAmount(row);
   const elapsed = row.reset_at && new Date(row.reset_at).getTime() <= Date.now();
-  const resetText =
-    reset.at && m("ui.join", { v0: reset.at, v1: DISPLAY_SEPARATOR, v2: elapsed ? m("ui.quota_reset_elapsed") : reset.after });
+  const usage = renderQuotaUsage(row, estimate);
+  const amount = quotaAmount(row);
   return el(
     "div",
     { class: "auth-quota-row" + (elapsed ? " elapsed" : "") },
-    el("span", { class: "auth-quota-label", "data-tip": label, "data-tip-overflow": "", text: label }),
-    el("span", { class: "auth-quota-value", text: value }),
+    el(
+      "div",
+      { class: "auth-quota-head" },
+      el("span", { class: "auth-quota-label", "data-tip": label, "data-tip-overflow": "", text: label }),
+      reset.at && el("span", { class: "auth-quota-reset-after", text: elapsed ? m("ui.quota_reset_elapsed") : reset.after }),
+      el("span", { class: "auth-quota-value", text: hasPercent ? percent.toFixed(0) + "%" : "—" })
+    ),
     el(
       "div",
       {
@@ -286,12 +314,13 @@ function renderQuotaRow(row) {
       },
       el("i", { class: "quota-fill " + (hasPercent ? level : "high"), style: "width:" + (hasPercent ? percent : 0) + "%" })
     ),
-    (amount || resetText) &&
+    (usage || amount || reset.at) &&
       el(
         "div",
-        { class: "auth-quota-stats" },
-        amount && el("span", { class: "auth-quota-amount", text: amount }),
-        resetText && el("span", { class: "auth-quota-reset-time", text: resetText })
+        { class: "auth-quota-foot" },
+        usage,
+        amount && el("span", { text: amount }),
+        reset.at && el("span", { class: "auth-quota-reset-time", text: reset.at })
       )
   );
 }
@@ -344,7 +373,8 @@ function authQuotaRefreshTitle(file) {
 }
 
 function renderAuthFileQuota(file, account) {
-  const owner = account ? accountUIState : adminUIState;
+  const ui = authUI(account);
+  const owner = ui.owner;
   const index = file.auth_index;
   const result = authFileQuota(file, owner);
   if (owner.authQuotaLoading.has(index) && !result) {
@@ -375,7 +405,7 @@ function renderAuthFileQuota(file, account) {
     summary.length ? el("div", { class: "auth-quota-summary" }, summary) : null,
     error && el("div", { class: "auth-quota-error", text: error }),
     rows.length
-      ? el("div", { class: "auth-quota-list" }, rows.map(renderQuotaRow))
+      ? el("div", { class: "auth-quota-list" }, rows.map((row) => renderQuotaRow(row, ui.estimate?.checked === true)))
       : el("div", { class: "muted small", text: m("ui.the_upstream_returned_no_displayable_quota") })
   );
 }
@@ -729,14 +759,12 @@ for (const account of [false, true]) {
   const ui = authUI(account);
   const role = account ? "account" : "admin";
   setLabeledActionIcon(ui.bulk, "refresh", m("ui.update_quotas"));
-  ui.enabledOnly.addEventListener("change", () => {
-    saveChoice(role, ui.enabledOnly.id);
-    renderAuthFiles(account);
-  });
-  ui.provider.addEventListener("change", () => {
-    saveChoice(role, ui.provider.id);
-    renderAuthFiles(account);
-  });
+  for (const filter of [ui.enabledOnly, ui.estimate, ui.provider].filter(Boolean)) {
+    filter.addEventListener("change", () => {
+      saveChoice(role, filter.id);
+      renderAuthFiles(account);
+    });
+  }
   ui.search.addEventListener("input", () => renderAuthFiles(account));
   ui.bulk.onclick = () => guard(() => refreshFilteredAuthQuotas(account));
 }

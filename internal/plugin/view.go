@@ -60,6 +60,14 @@ type viewAccess struct {
 	Key        billing.KeyView
 }
 
+// usageScope limits usage statistics to the presenting API key.
+func (access viewAccess) usageScope() string {
+	if access.APIKey {
+		return access.Scope
+	}
+	return ""
+}
+
 func (a *App) apiKeyViewAccess(req ManagementRequest) (viewAccess, bool) {
 	scope, ok := accountScope(req.Headers)
 	if !ok {

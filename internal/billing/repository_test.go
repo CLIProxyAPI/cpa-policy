@@ -22,6 +22,14 @@ func (r *memoryRepository) CredentialUsage(authIndexes []string, scope string, f
 	return map[string]CredentialUsage{}, r.fail
 }
 
+func (r *memoryRepository) QuotaReadings(authIndex, header string, from, to time.Time) ([]QuotaReading, error) {
+	return nil, r.fail
+}
+
+func (r *memoryRepository) QuotaPeriodUsage(period QuotaPeriod, scope string) (QuotaPeriodUsage, error) {
+	return QuotaPeriodUsage{}, r.fail
+}
+
 func (r *memoryRepository) Load(requestCutoff, pluginCutoff time.Time) (Snapshot, error) {
 	if r.state == nil {
 		r.state = NewState()

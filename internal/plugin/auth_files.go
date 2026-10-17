@@ -90,7 +90,11 @@ type quotaRow struct {
 	Currency         string           `json:"currency,omitempty"`
 	ResetAt          string           `json:"reset_at,omitempty"`
 	ObservedAt       time.Time        `json:"observed_at,omitzero"`
-	windowSeconds    int64
+	// Usage is what CLIProxyAPI requests consumed in the window's current period,
+	// which began windowSeconds before ResetAt.
+	Usage         *billing.QuotaPeriodUsage `json:"usage,omitempty"`
+	windowSeconds int64
+	meter         *quotaMeter
 }
 
 type authQuotaResponse struct {
@@ -142,6 +146,9 @@ func (a *App) authQuota(req ManagementRequest, access viewAccess) ManagementResp
 	result, errQuota := a.fetchAuthQuota(req.HostCallbackID, *selected)
 	if errQuota != nil {
 		return viewDetailedError(access, http.StatusBadGateway, "quota_failed", errQuota)
+	}
+	if errUsage := a.attachQuotaUsage(access.usageScope(), map[string]*authQuotaResponse{selected.AuthIndex: &result}); errUsage != nil {
+		return viewErrorResponse(access, errUsage)
 	}
 	return viewJSON(access, http.StatusOK, result)
 }
@@ -244,18 +251,21 @@ func (a *App) listAuthFiles(access viewAccess, from, to time.Time) ([]authFileVi
 	for i := range views {
 		indexes[i] = views[i].AuthIndex
 	}
-	scope := ""
-	if access.APIKey {
-		scope = access.Scope
-	}
-	usage, errUsage := a.store.CredentialUsage(indexes, scope, from, to)
+	usage, errUsage := a.store.CredentialUsage(indexes, access.usageScope(), from, to)
 	if errUsage != nil {
 		return nil, errUsage
 	}
+	quotas := make(map[string]*authQuotaResponse)
 	for i := range views {
 		value := usage[views[i].AuthIndex]
 		views[i].Usage = value.Stats
 		views[i].Quota = observedAuthQuota(views[i].Category, views[i].CacheRevision, value.Quota)
+		if views[i].Quota != nil {
+			quotas[views[i].AuthIndex] = views[i].Quota
+		}
+	}
+	if errUsage := a.attachQuotaUsage(access.usageScope(), quotas); errUsage != nil {
+		return nil, errUsage
 	}
 	sort.SliceStable(views, func(i, j int) bool {
 		left, right := authCategoryOrder(views[i].Category), authCategoryOrder(views[j].Category)
@@ -710,18 +720,15 @@ func (c *authQuotaClient) fetchCodexQuota(result *authQuotaResponse) error {
 	}
 	credits := objectMap(object, "credits")
 	result.CreditBalance, result.CreditsUnlimited = codexCreditBalance(credits["balance"]), credits["unlimited"] == true
-	appendCodexRateLimit(result, "", objectMap(object, "rate_limit", "rateLimit"))
-	appendCodexRateLimit(result, "Code Review ", objectMap(object, "code_review_rate_limit", "codeReviewRateLimit"))
+	appendCodexRateLimit(result, codexMainLimit, objectMap(object, "rate_limit", "rateLimit"))
+	appendCodexRateLimit(result, codexCodeReviewLimit, objectMap(object, "code_review_rate_limit", "codeReviewRateLimit"))
 	for _, raw := range objectSlice(object, "additional_rate_limits", "additionalRateLimits") {
 		additional, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		name := firstString(additional, "limit_name", "limitName")
-		if name == "" {
-			name = "Additional"
-		}
-		appendCodexRateLimit(result, name+" ", objectMap(additional, "rate_limit", "rateLimit"))
+		limit := codexAdditionalLimit(firstString(additional, "limit_name", "limitName"))
+		appendCodexRateLimit(result, limit, objectMap(additional, "rate_limit", "rateLimit"))
 	}
 	usageCredits := normalizeCodexResetCredits(objectMap(object, "rate_limit_reset_credits", "rateLimitResetCredits"))
 	result.RateLimitResetCreditsAvailableCount = usageCredits.availableCount
@@ -781,9 +788,10 @@ type quotaWindow struct {
 	Seconds          int64
 	RemainingPercent *float64
 	ResetAt          string
+	meter            *quotaMeter
 }
 
-func appendCodexRateLimit(result *authQuotaResponse, labelPrefix string, info map[string]any) {
+func appendCodexRateLimit(result *authQuotaResponse, limit codexLimit, info map[string]any) {
 	allowed, hasAllowed := boolValue(info, "allowed")
 	reached, hasReached := boolValue(info, "limit_reached", "limitReached")
 	windows := []quotaWindow{}
@@ -794,7 +802,7 @@ func appendCodexRateLimit(result *authQuotaResponse, labelPrefix string, info ma
 			continue
 		}
 		seconds, _ := intValue(value, "limit_window_seconds", "limitWindowSeconds")
-		window := quotaWindow{Role: role, Seconds: seconds}
+		window := quotaWindow{Role: role, Seconds: seconds, meter: limit.meter(role)}
 		if used, ok := floatValue(value, "used_percent", "usedPercent"); ok {
 			window.RemainingPercent = remainingPercent(100 - used)
 		} else if hasReached && reached || hasAllowed && !allowed {
@@ -807,7 +815,7 @@ func appendCodexRateLimit(result *authQuotaResponse, labelPrefix string, info ma
 		}
 		windows = append(windows, window)
 	}
-	appendQuotaWindows(result, labelPrefix, windows)
+	appendQuotaWindows(result, limit.labelPrefix, windows)
 }
 
 func appendQuotaWindows(result *authQuotaResponse, labelPrefix string, windows []quotaWindow) {
@@ -831,7 +839,7 @@ func appendQuotaWindows(result *authQuotaResponse, labelPrefix string, windows [
 		}
 		result.Quota = append(result.Quota, quotaRow{Label: labelPrefix + label,
 			LabelMessage: messages.Literal(label), LabelPrefix: labelPrefix,
-			RemainingPercent: window.RemainingPercent, ResetAt: window.ResetAt})
+			RemainingPercent: window.RemainingPercent, ResetAt: window.ResetAt, windowSeconds: window.Seconds, meter: window.meter})
 	}
 }
 
@@ -881,11 +889,19 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 		return errCall
 	}
 	fable := claudeFableLimit(usage)
-	for _, window := range []struct{ key, label string }{
-		{"five_hour", "5-hour limit"}, {"seven_day", "Weekly limit"},
-		{"seven_day_oauth_apps", "OAuth Apps weekly limit"}, {"seven_day_opus", "Opus weekly limit"},
-		{"seven_day_sonnet", "Sonnet weekly limit"}, {"seven_day_cowork", "Cowork weekly limit"},
-		{"iguana_necktie", "Iguana Necktie"},
+	const fiveHours, week = 5 * 60 * 60, 7 * 24 * 60 * 60
+	for _, window := range []struct {
+		key, label string
+		seconds    int64
+		meter      *quotaMeter
+	}{
+		{"five_hour", "5-hour limit", fiveHours, claudeUnifiedMeter("5h")},
+		{"seven_day", "Weekly limit", week, claudeUnifiedMeter("7d")},
+		{"seven_day_oauth_apps", "OAuth Apps weekly limit", week, nil},
+		{"seven_day_opus", "Opus weekly limit", week, claudeModelMeter("opus")},
+		{"seven_day_sonnet", "Sonnet weekly limit", week, claudeModelMeter("sonnet")},
+		{"seven_day_cowork", "Cowork weekly limit", week, nil},
+		{"iguana_necktie", "Iguana Necktie", 0, nil},
 	} {
 		if window.key == "iguana_necktie" && fable != nil {
 			continue
@@ -894,7 +910,8 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 		if value == nil {
 			continue
 		}
-		row := quotaRow{Label: window.label, LabelMessage: messages.Literal(window.label), ResetAt: quotaResetAt(firstString(value, "resets_at", "resetsAt"))}
+		row := quotaRow{Label: window.label, LabelMessage: messages.Literal(window.label), ResetAt: quotaResetAt(firstString(value, "resets_at", "resetsAt")),
+			windowSeconds: window.seconds, meter: window.meter}
 		if percent, ok := floatValue(value, "utilization"); ok {
 			row.RemainingPercent = remainingPercent(100 - percent)
 		}
@@ -902,7 +919,8 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 	}
 	if fable != nil {
 		percent, _ := floatValue(fable, "percent")
-		result.Quota = append(result.Quota, quotaRow{Label: "Fable weekly limit", LabelMessage: messages.New("Fable weekly limit"), RemainingPercent: remainingPercent(100 - percent), ResetAt: quotaResetAt(firstString(fable, "resets_at", "resetsAt"))})
+		result.Quota = append(result.Quota, quotaRow{Label: "Fable weekly limit", LabelMessage: messages.New("Fable weekly limit"),
+			RemainingPercent: remainingPercent(100 - percent), ResetAt: quotaResetAt(firstString(fable, "resets_at", "resetsAt")), windowSeconds: week, meter: claudeModelMeter("fable")})
 	}
 	if extra := objectMap(usage, "extra_usage", "extraUsage"); extra != nil {
 		enabled, hasEnabled := boolValue(extra, "is_enabled", "isEnabled")
@@ -965,7 +983,7 @@ func (c *authQuotaClient) fetchKimiQuota(result *authQuotaResponse) error {
 		}
 		windowSeconds := kimiWindowSeconds(limit)
 		label := firstNonEmptyString(firstString(limit, "name", "title"), firstString(detail, "name", "title"), windowLabel(windowSeconds), "Quota")
-		row := quotaRow{Label: label,
+		row := quotaRow{Label: label, windowSeconds: windowSeconds, meter: &quotaMeter{},
 			ResetAt: quotaResetAt(firstString(limit, "reset_at", "resetAt", "resetTime"), firstString(detail, "reset_at", "resetAt", "resetTime"))}
 		if firstNonEmptyString(firstString(limit, "name", "title"), firstString(detail, "name", "title")) == "" {
 			row.LabelMessage = messages.Literal(label)
@@ -1017,8 +1035,9 @@ func (c *authQuotaClient) fetchXAIQuota(result *authQuotaResponse) error {
 		monthlyConfig = objectMap(objectMap(monthly, "body"), "config")
 	}
 	if percent, ok := floatValue(weeklyConfig, "creditUsagePercent", "credit_usage_percent"); ok {
-		row := quotaRow{Label: "Weekly limit", LabelMessage: messages.New("Weekly limit"), RemainingPercent: remainingPercent(100 - percent), ResetAt: xaiResetAt(weeklyConfig)}
-		result.Quota = append(result.Quota, row)
+		resetAt, start := xaiResetAt(weeklyConfig), firstString(objectMap(weeklyConfig, "currentPeriod", "current_period"), "start")
+		result.Quota = append(result.Quota, quotaRow{Label: "Weekly limit", LabelMessage: messages.New("Weekly limit"), RemainingPercent: remainingPercent(100 - percent),
+			ResetAt: resetAt, windowSeconds: periodSeconds(start, resetAt), meter: &quotaMeter{}})
 	}
 	prepaid, hasPrepaid := usdValue(weeklyConfig, "prepaidBalance", "prepaid_balance")
 	if !hasPrepaid {
@@ -1036,7 +1055,9 @@ func (c *authQuotaClient) fetchXAIQuota(result *authQuotaResponse) error {
 		hasOnDemandUsed = true
 	}
 	if hasLimit || hasUsed {
-		row := quotaRow{Label: "Monthly allowance", LabelMessage: messages.New("Monthly allowance"), Currency: "USD", ResetAt: quotaResetAt(firstString(monthlyConfig, "billingPeriodEnd", "billing_period_end"))}
+		resetAt := quotaResetAt(firstString(monthlyConfig, "billingPeriodEnd", "billing_period_end"))
+		row := quotaRow{Label: "Monthly allowance", LabelMessage: messages.New("Monthly allowance"), Currency: "USD", ResetAt: resetAt,
+			windowSeconds: periodSeconds(firstString(monthlyConfig, "billingPeriodStart", "billing_period_start"), resetAt), meter: &quotaMeter{}}
 		if hasLimit {
 			row.Limit = floatPointer(monthlyLimit)
 		}

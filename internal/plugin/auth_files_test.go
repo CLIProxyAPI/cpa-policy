@@ -530,7 +530,7 @@ func TestCodexResetCreditPreservesUnknownDateFormat(t *testing.T) {
 
 func TestCodexQuotaOrdersAndLabelsWindows(t *testing.T) {
 	result := authQuotaResponse{Quota: []quotaRow{}}
-	appendCodexRateLimit(&result, "", map[string]any{
+	appendCodexRateLimit(&result, codexMainLimit, map[string]any{
 		"allowed": false,
 		"primary_window": map[string]any{
 			"limit_window_seconds": float64(29 * 24 * 60 * 60),

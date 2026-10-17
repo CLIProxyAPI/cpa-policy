@@ -1041,6 +1041,7 @@ details[open] > .details-summary .lucide-chevron-icon, .routing-section-toggle[a
 .empty { padding: 26px; text-align: center; color: var(--text-tertiary); }
 .section-loading { min-height: 400px; }
 .auth-filter-bar { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.auth-filter-switches { display: contents; }
 .auth-filter-bar .native-select, .auth-filter-bar select { min-width: 150px; }
 .auth-filter-bar input[type="search"] { flex: 0 1 var(--filter-search-width); min-width: 140px; }
 .toggle-filter {
@@ -1190,14 +1191,20 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
   padding: 0;
   flex: none;
 }
-.auth-file-actions .loading .lucide-icon, [data-page-action="refresh"]:disabled .lucide-icon {
+.auth-file-actions .loading .lucide-icon,
+[data-page-action="refresh"]:disabled .lucide-icon,
+.auth-filter-bar [data-loading="true"] .lucide-icon {
   animation: auth-refresh-spin 0.8s linear infinite;
 }
 @keyframes auth-refresh-spin {
   to { transform: rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .auth-file-actions .loading .lucide-icon, [data-page-action="refresh"]:disabled .lucide-icon { animation: none; }
+  .auth-file-actions .loading .lucide-icon,
+  [data-page-action="refresh"]:disabled .lucide-icon,
+  .auth-filter-bar [data-loading="true"] .lucide-icon {
+    animation: none;
+  }
 }
 .auth-file-quota { display: grid; gap: 10px; min-width: 0; container: auth-quota / inline-size; }
 .auth-quota-summary { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text-secondary); font-size: 12px; }
@@ -1237,11 +1244,12 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
   .auth-quota-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .auth-quota-list > :only-child { grid-column: 1 / -1; }
-.auth-quota-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 7px; min-width: 0; }
-.auth-quota-row > .bar, .auth-quota-stats { grid-column: 1 / -1; }
+.auth-quota-row { display: grid; gap: 5px; min-width: 0; }
 .auth-quota-row.elapsed .quota-fill { opacity: 0.45; }
 .auth-quota-row.elapsed .auth-quota-value { color: var(--text-tertiary); }
+.auth-quota-head { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .auth-quota-label {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1249,17 +1257,18 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
   color: var(--text-secondary);
   font-size: 12px;
 }
-.auth-quota-stats {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  min-width: 0;
-  flex-wrap: wrap;
+.auth-quota-value { color: var(--text-primary); font-size: 12px; }
+.auth-quota-reset-after, .auth-quota-foot {
   color: var(--text-tertiary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.auth-quota-value { color: var(--text-primary); font-size: 12px; }
+.auth-quota-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
+.auth-quota-reset-time { margin-left: auto; }
+.auth-quota-metrics { display: inline-flex; gap: 10px; color: var(--text-secondary); }
+.auth-quota-metric { display: inline-flex; align-items: center; gap: 3px; }
+.auth-quota-metric .lucide-icon { display: block; width: 12px; height: 12px; }
 .auth-quota-error {
   padding: 9px 10px;
   border: 1px solid var(--failure-badge-border);
@@ -1295,14 +1304,6 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
   .auth-usage-detail.inline::before { content: "("; }
   .auth-usage-detail.inline::after { content: ")"; }
   .auth-quota-list { gap: 10px 16px; }
-  .auth-quota-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 5px 7px; }
-  .auth-quota-label { grid-column: 1; grid-row: 1; }
-  .auth-quota-value { grid-column: 3; grid-row: 1; }
-  .auth-quota-row > .bar { grid-row: 2; }
-  .auth-quota-stats { display: contents; }
-  .auth-quota-reset-time { grid-column: 2; grid-row: 1; color: var(--text-tertiary); font-size: 11px; white-space: nowrap; }
-  .auth-quota-amount { grid-column: 1 / -1; grid-row: 3; color: var(--text-tertiary); font-size: 11px; }
-  .auth-quota-row:not(:has(.auth-quota-reset-time)) .auth-quota-label { grid-column: 1 / 3; }
 }
 @container auth-table (max-width: 560px) {
   .auth-file-table .auth-file-row {
@@ -1944,11 +1945,12 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
     min-width: 0;
     white-space: normal;
   }
-  .section-actions.auth-filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .auth-filter-bar input[type="search"], .auth-filter-bar .native-select, .auth-filter-bar select, .auth-filter-bar .toggle-filter {
-    width: 100%;
-    min-width: 0;
-  }
+  /* The switches take the first line; category, search and the refresh icon share the second. */
+  .section-actions.auth-filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; }
+  .auth-filter-switches { display: flex; flex-wrap: wrap; grid-column: 1 / -1; gap: 8px; }
+  .auth-filter-switches > .toggle-filter { flex: 1 1 auto; }
+  .auth-filter-bar input[type="search"], .auth-filter-bar .native-select, .auth-filter-bar select { width: 100%; min-width: 0; }
+  .auth-filter-bar > .labeled-icon-button > span { display: none; }
   .section-actions.event-card-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .section-actions.event-card-actions .native-select, .section-actions.event-card-actions select { width: 100%; min-width: 0; }
   .event-card-actions > .link { justify-self: start; }
@@ -2123,8 +2125,9 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   .usage-distribution-chart { width: min(240px, 75vw); height: min(240px, 75vw); }
 }
 @media (max-width: 640px) {
-  .page-tab-actions > .native-select > select { padding-left: 8px; padding-right: 26px; }
-  .page-tab-actions > .native-select::after { right: 6px; width: 16px; height: 16px; }
+  .page-tab-actions > .native-select > select, .auth-filter-bar > .native-select > select { padding-left: 8px; padding-right: 26px; }
+  .page-tab-actions > .native-select::after, .auth-filter-bar > .native-select::after { right: 6px; width: 16px; height: 16px; }
+  .auth-filter-switches > .toggle-filter { padding-inline: 8px; }
   .page-tab-actions > .native-select > .native-select-icon + select { padding-left: 30px; }
   .time-range-trigger { --button-padding-inline: 8px; gap: 6px; }
   .time-range-chevron { width: 16px; height: 16px; margin-left: 0; }

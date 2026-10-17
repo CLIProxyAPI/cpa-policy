@@ -253,10 +253,16 @@
             <div class="row spread section-toolbar">
               <h2 data-i18n="ui.auth_files">Auth Files</h2>
               <div class="row section-actions auth-filter-bar">
-                <label class="toggle-filter">
-                  <input id="auth-enabled-only" type="checkbox" role="switch" checked />
-                  <span data-i18n="ui.enabled_only">Enabled only</span>
-                </label>
+                <div class="auth-filter-switches">
+                  <label class="toggle-filter">
+                    <input id="auth-enabled-only" type="checkbox" role="switch" checked />
+                    <span data-i18n="ui.enabled_only">Enabled only</span>
+                  </label>
+                  <label class="toggle-filter">
+                    <input id="auth-quota-estimate" type="checkbox" role="switch" />
+                    <span data-i18n="ui.quota_estimate">Quota estimate</span>
+                  </label>
+                </div>
                 <span class="native-select">
                   <select id="auth-provider" aria-label="Filter by auth file category" data-i18n-aria-label="ui.filter_by_auth_file_category">
                     <option value="" data-i18n="ui.all_categories">All categories</option>
@@ -430,10 +436,12 @@
               <div class="row spread section-toolbar">
                 <h2 data-i18n="ui.auth_files">Auth Files</h2>
                 <div class="row section-actions auth-filter-bar">
-                  <label class="toggle-filter">
-                    <input id="account-auth-enabled-only" type="checkbox" role="switch" checked />
-                    <span data-i18n="ui.enabled_only">Enabled only</span>
-                  </label>
+                  <div class="auth-filter-switches">
+                    <label class="toggle-filter">
+                      <input id="account-auth-enabled-only" type="checkbox" role="switch" checked />
+                      <span data-i18n="ui.enabled_only">Enabled only</span>
+                    </label>
+                  </div>
                   <span class="native-select">
                     <select id="account-auth-provider" aria-label="Filter by auth file category" data-i18n-aria-label="ui.filter_by_auth_file_category">
                       <option value="" data-i18n="ui.all_categories">All categories</option>

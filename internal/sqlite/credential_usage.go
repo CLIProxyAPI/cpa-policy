@@ -3,6 +3,7 @@ package sqlite
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,64 @@ func (d *DB) CredentialUsage(authIndexes []string, scope string, from, to time.T
 		result[authIndex] = usage
 	}
 	return result, nil
+}
+
+func (d *DB) QuotaReadings(authIndex, header string, from, to time.Time) ([]billing.QuotaReading, error) {
+	rows, err := d.db.Query(`SELECT at, value FROM (
+		SELECT id, at, value, lag(value) OVER (ORDER BY at, id) AS previous FROM (
+			SELECT id, at, CAST(json_extract(response_headers_json, ?) AS REAL) AS value
+			FROM request_events
+			WHERE auth_index = ? AND at >= ? AND at <= ? AND response_headers_json != '{}'
+		) WHERE value IS NOT NULL
+	) WHERE previous IS NULL OR value != previous ORDER BY at, id`,
+		"$."+strconv.Quote(header)+"[0]", authIndex, nanos(from), nanos(to))
+	if err != nil {
+		return nil, fmt.Errorf("Read quota readings: %w", err)
+	}
+	defer rows.Close()
+	var readings []billing.QuotaReading
+	for rows.Next() {
+		var at int64
+		var reading billing.QuotaReading
+		if err := rows.Scan(&at, &reading.Value); err != nil {
+			return nil, fmt.Errorf("Read quota readings: %w", err)
+		}
+		reading.At = time.Unix(0, at).UTC()
+		readings = append(readings, reading)
+	}
+	return readings, rows.Err()
+}
+
+func (d *DB) QuotaPeriodUsage(period billing.QuotaPeriod, scope string) (billing.QuotaPeriodUsage, error) {
+	filter := "auth_index = ? AND at >= ? AND at <= ?"
+	args := []any{period.AuthIndex, nanos(period.Start), nanos(period.End)}
+	if scope != "" {
+		filter += " AND scope = ?"
+		args = append(args, scope)
+	}
+	matchModels := func(fragments []string) string {
+		terms := make([]string, len(fragments))
+		for i, fragment := range fragments {
+			terms[i] = "instr(lower(upstream_model), ?) > 0"
+			args = append(args, strings.ToLower(fragment))
+		}
+		return "(" + strings.Join(terms, " OR ") + ")"
+	}
+	if len(period.Models.Include) > 0 {
+		filter += " AND " + matchModels(period.Models.Include)
+	}
+	if len(period.Models.Exclude) > 0 {
+		filter += " AND NOT " + matchModels(period.Models.Exclude)
+	}
+	var usage billing.QuotaPeriodUsage
+	err := d.db.QueryRow(`SELECT
+		coalesce(sum(uncached_input_tokens + cache_read_tokens + cache_write_tokens + billed_output_tokens), 0),
+		coalesce(sum(total_usd), 0)
+		FROM request_events WHERE `+filter, args...).Scan(&usage.Tokens, &usage.CostUSD)
+	if err != nil {
+		return usage, fmt.Errorf("Read quota period usage: %w", err)
+	}
+	return usage, nil
 }
 
 func (d *DB) credentialUsageStats(filter string, args []any) (map[string]billing.CredentialUsage, error) {

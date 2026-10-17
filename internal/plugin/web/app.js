@@ -238,6 +238,7 @@ function restoreRolePreferences(role) {
     restoreChoice(role, "analysis-key", "", true);
     if ($("analysis-key").value === UNASSIGNED_KEY) $("analysis-key").selectedOptions[0].textContent = m("ui.unassigned");
     restoreChoice(role, "keys-include-deleted", false);
+    restoreChoice(role, "auth-quota-estimate", false);
     restoreChoice(role, "plugin-log-level", "all");
   }
   sharedTimeRanges[role] = storedTimeRange(role);

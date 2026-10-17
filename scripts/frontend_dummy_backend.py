@@ -484,6 +484,10 @@ def auth_file_views(files, query, scope=""):
     return views
 
 
+def quota_usage(tokens, cost_usd):
+    return {"usage": {"tokens": tokens, "cost_usd": cost_usd}}
+
+
 def quota_row(label, remaining_percent, reset_seconds, **extra):
     return {
         "label": label,
@@ -503,18 +507,20 @@ AUTH_FILE_QUOTAS = {
             {"expires_at": iso(NOW + timedelta(days=14, hours=10))},
         ],
         "quota": [
-            quota_row("周限额", 62, 432000),
+            quota_row("周限额", 62, 432000, **quota_usage(48_612_340, 36.2)),
             quota_row(
                 "5 小时限额",
                 100,
                 18000,
                 label_prefix="GPT-5.3-Codex-Spark ",
+                **quota_usage(0, 0),
             ),
             quota_row(
                 "周限额",
                 100,
                 604800,
                 label_prefix="GPT-5.3-Codex-Spark ",
+                **quota_usage(0, 0),
             ),
         ],
     },
@@ -524,16 +530,16 @@ AUTH_FILE_QUOTAS = {
         "rate_limit_reset_credits_available_count": 1,
         "rate_limit_reset_credits": [{"expires_at": iso(NOW + timedelta(days=7))}],
         "quota": [
-            quota_row("5 小时限额", 35, 14400),
-            quota_row("周限额", 90, 518400),
+            quota_row("5 小时限额", 35, 14400, **quota_usage(12_408_115, 9.86)),
+            quota_row("周限额", 90, 518400, **quota_usage(18_930_552, 15.31)),
         ],
     },
     "auth-demo-claude": {
         "plan": "Team",
         "rate_limit_reset_credits_available_count": 1,
         "quota": [
-            quota_row("5 小时限额", 76, 12600),
-            quota_row("周限额", 59, 388800),
+            quota_row("5 小时限额", 76, 12600, **quota_usage(3_104_822, 8.42)),
+            quota_row("周限额", 59, 388800, **quota_usage(21_733_906, 57.8)),
             {
                 "label": "额外用量",
                 "used": 12.5,
@@ -562,15 +568,15 @@ AUTH_FILE_QUOTAS = {
     },
     "auth-demo-kimi": {
         "quota": [
-            quota_row("5 小时限额", 48, 7200),
-            quota_row("周限额", 69, 345600),
+            quota_row("5 小时限额", 48, 7200, **quota_usage(2_405_118, 1.27)),
+            quota_row("周限额", 69, 345600, **quota_usage(4_822_391, 2.61)),
         ],
     },
     "auth-demo-xai-active": {
         "credit_balance": "12.34",
         "credit_currency": "USD",
         "quota": [
-            quota_row("周限额", 78, 410400),
+            quota_row("周限额", 78, 410400, **quota_usage(5_310_027, 6.94)),
             {
                 "label": "月度额度",
                 "used": 8.5,
@@ -578,6 +584,7 @@ AUTH_FILE_QUOTAS = {
                 "remaining_percent": 83,
                 "currency": "USD",
                 "reset_at": iso(NOW + timedelta(seconds=1814400)),
+                **quota_usage(7_102_448, 9.12),
             },
         ],
     },
@@ -1682,6 +1689,8 @@ class Handler(BaseHTTPRequestHandler):
                 quota["rate_limit_reset_credits"].pop(0)
             for row in quota["quota"]:
                 row["remaining_percent"] = 100
+                if "usage" in row:
+                    row.update(quota_usage(0, 0))
             self.send_json(200, {"reset": True, "cooldown_cleared": True})
 
     def do_PATCH(self):

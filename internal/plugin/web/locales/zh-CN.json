@@ -698,6 +698,8 @@
   "ui.cache_rate": "缓存率",
   "ui.quota": "额度",
   "ui.quota_reset_elapsed": "已到重置时间",
+  "ui.quota_estimate": "额度预估",
+  "ui.quota_estimate_unavailable": "当前用量为 0，无法预估",
   "ui.auth_request_outcomes": "成功：{v0} · 失败：{v1}",
   "ui.quota_reset_but_cooldown_clear_failed": "上游额度已重置，但未能清除本地路由冷却，请在 CPA 中清除冷却后重试。",
   "ui.execution_id": "执行 ID",
