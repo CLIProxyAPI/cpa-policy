@@ -235,19 +235,23 @@ function compactDistribution(rows, metric) {
   const visible = sorted.slice(0, 5).map((row) => ({ ...row }));
   const rest = sorted.slice(5);
   if (rest.length) {
-    visible.push({
-      key: "other",
-      label: m("ui.other"),
-      total_tokens: rest.reduce((sum, row) => sum + Number(row.total_tokens || 0), 0),
-      requests: rest.reduce((sum, row) => sum + Number(row.requests || 0), 0),
-      cost_usd: rest.reduce((sum, row) => sum + Number(row.cost_usd || 0), 0)
-    });
+    const other = { grouped: true, label: m("ui.other") };
+    for (const field of [
+      "total_tokens",
+      "input_tokens",
+      "output_tokens",
+      "cache_read_tokens",
+      "cache_write_tokens",
+      "requests",
+      "cost_usd"
+    ]) { other[field] = rest.reduce((sum, row) => sum + Number(row[field] || 0), 0); }
+    visible.push(other);
   }
   for (const row of visible) { row.percent = total > 0 ? (Number(row[metric] || 0) * 100) / total : 0; }
   return visible;
 }
 
-function namesIdentity(dimension, row) { return ["api_keys", "sources"].includes(dimension) && !!row?.key && row.key !== "other"; }
+function namesIdentity(dimension, row) { return ["api_keys", "sources"].includes(dimension) && !!row?.key; }
 
 function renderUsageDistributionChart(account, rows, dimension, dimensionLabel, metric, colors, animate) {
   const canvas = $(account ? "account-usage-chart" : "usage-chart");
@@ -263,7 +267,7 @@ function renderUsageDistributionChart(account, rows, dimension, dimensionLabel, 
       type: "doughnut",
       data: {
         labels: rows.map((row) =>
-          dimension === "api_keys" && row.key !== "other" ? apiKeyIdentity(row).text : row.label || row.key || m("ui.unknown_2")
+          dimension === "api_keys" && !row.grouped ? apiKeyIdentity(row).text : row.label || row.key || m("ui.unknown_2")
         ),
         datasets: [
           {
@@ -493,6 +497,16 @@ function summaryLine(label, value) {
   return el("div", { class: "analysis-summary-line" }, el("span", {}, label), el("strong", { class: "mono" }, value));
 }
 
+function tokenBreakdown(usage) {
+  const rows = [
+    [m("ui.input"), tokens(usage.input_tokens)],
+    [m("ui.output"), tokens(usage.output_tokens)],
+    [m("ui.cache_read"), tokens(usage.cache_read_tokens)]
+  ];
+  if (Number(usage.cache_write_tokens || 0) > 0) rows.push([m("ui.cache_write"), tokens(usage.cache_write_tokens)]);
+  return rows;
+}
+
 function renderAnalysisSummary(summary, trends, daily) {
   const cost = summary.cost;
   const averageLabel = daily ? m("ui.daily_average") : m("ui.hourly_average");
@@ -519,7 +533,6 @@ function renderAnalysisSummary(summary, trends, daily) {
     const value = Number(amount || 0);
     return summaryLine(label, value === 0 ? "$0.0000" : usd(value));
   };
-  const hasCacheWriteTokens = Number(summary.cache_write_tokens || 0) > 0;
   const hasCacheWriteCost = Number(cost.cache_write_usd || 0) > 0;
   const costRows = [
     costDetail(m("ui.input"), cost.input_usd),
@@ -527,12 +540,7 @@ function renderAnalysisSummary(summary, trends, daily) {
     costDetail(m("ui.cache_read"), cost.cache_read_usd)
   ];
   if (hasCacheWriteCost) costRows.push(costDetail(m("ui.cache_write"), cost.cache_write_usd));
-  const tokenRows = [
-    summaryLine(m("ui.input"), tokens(summary.input_tokens)),
-    summaryLine(m("ui.output"), tokens(summary.output_tokens)),
-    summaryLine(m("ui.cache_read"), tokens(summary.cache_read_tokens))
-  ];
-  if (hasCacheWriteTokens) tokenRows.push(summaryLine(m("ui.cache_write"), tokens(summary.cache_write_tokens)));
+  const tokenRows = tokenBreakdown(summary).map(([label, value]) => summaryLine(label, value));
   return el(
     "div",
     { class: "analysis-summary-grid" },
@@ -565,6 +573,11 @@ function renderAnalysisSummary(summary, trends, daily) {
   );
 }
 
+function renderDistributionTokenTooltip(row) {
+  const metrics = [...tokenBreakdown(row), [m("ui.cache_rate"), cacheReadRate(row.cache_read_tokens, row.input_tokens)]];
+  return [el("dl", { class: "tooltip-metrics" }, metrics.flatMap(([label, value]) => [el("dt", {}, label), el("dd", {}, value)]))];
+}
+
 function renderAnalysisDistribution(account, { colors = analysisColors(), animate = false } = {}) {
   const role = account ? "account" : "admin";
   const analysis = analysisQueries[role].value;
@@ -575,9 +588,10 @@ function renderAnalysisDistribution(account, { colors = analysisColors(), animat
   const metric = analysisMetrics[role];
   const rows = compactDistribution(analysis.usage_distribution[dimension], metric);
   for (const row of rows) {
+    if (row.grouped) continue;
     if (!row.key)
       row.label = m(dimension === "models" ? "ui.unknown_model" : dimension === "sources" ? "ui.unknown_source" : "ui.unassigned");
-    else if (dimension === "sources" && row.key !== "other") row.label = displayLabel(row.label || row.key);
+    else if (dimension === "sources") row.label = displayLabel(row.label || row.key);
   }
   const metricSelect = el(
     "select",
@@ -610,7 +624,7 @@ function renderAnalysisDistribution(account, { colors = analysisColors(), animat
       el(
         "div",
         { class: "usage-distribution-heading" },
-        dimension === "api_keys" && row.key !== "other"
+        dimension === "api_keys" && !row.grouped
           ? el("span", { class: namesIdentity(dimension, row) ? "mask-blur" : "", text: apiKeyIdentity(row).text })
           : el("b", {}, namesIdentity(dimension, row) ? maskedLabelText(row.label) : row.label || row.key || m("ui.unknown_2")),
         el("b", { class: "mono" }, row.percent.toFixed(2) + "%")
@@ -620,7 +634,14 @@ function renderAnalysisDistribution(account, { colors = analysisColors(), animat
         "div",
         { class: "usage-distribution-metrics" },
         Object.entries(DISTRIBUTION_METRICS).map(([key, item]) =>
-          el("span", { class: key === metric ? "active" : "" }, item.label + " " + item.format(row))
+          el(
+            "span",
+            {
+              class: key === metric ? "active" : "",
+              ...hoverTooltipProps(() => renderDistributionTokenTooltip(row), key === "total_tokens")
+            },
+            item.label + " " + item.format(row)
+          )
         )
       )
     )
@@ -638,6 +659,7 @@ function renderAnalysisDistribution(account, { colors = analysisColors(), animat
   target.querySelector(".usage-distribution-layout").classList.toggle("hidden", !rows.length);
   target.querySelector(".usage-distribution-empty").classList.toggle("hidden", !!rows.length);
   renderUsageDistributionChart(account, rows, dimension, labels[dimension], metric, colors, animate);
+  refreshHoverTooltip();
 }
 
 function renderSpeedTrend(account, view) {

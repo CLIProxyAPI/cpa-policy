@@ -1222,12 +1222,20 @@ def analysis_view(query, scope=""):
                 label = entry.get("preview", "")
             item = grouped.setdefault(key, {"key": key, "label": label or key,
                                             "total_tokens": 0, "requests": 0,
+                                            "input_tokens": 0, "output_tokens": 0,
+                                            "cache_read_tokens": 0, "cache_write_tokens": 0,
                                             "cost_usd": 0})
             if field == "scope":
                 item["preview"] = entry.get("preview", "")
             cost = entry.get("cost", {})
-            item["total_tokens"] += sum(cost.get(name, 0) for name in (
-                "uncached_input_tokens", "cache_read_tokens", "cache_write_tokens", "billed_output_tokens"))
+            input_tokens = sum(cost.get(name, 0) for name in (
+                "uncached_input_tokens", "cache_read_tokens", "cache_write_tokens"))
+            output_tokens = cost.get("billed_output_tokens", 0)
+            item["input_tokens"] += input_tokens
+            item["output_tokens"] += output_tokens
+            item["cache_read_tokens"] += cost.get("cache_read_tokens", 0)
+            item["cache_write_tokens"] += cost.get("cache_write_tokens", 0)
+            item["total_tokens"] += input_tokens + output_tokens
             item["requests"] += 1
             item["cost_usd"] += cost.get("total_usd", 0)
         token_total = sum(item["total_tokens"] for item in grouped.values())

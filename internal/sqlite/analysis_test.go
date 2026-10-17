@@ -146,6 +146,53 @@ func TestAnalysisSummaryIncludesTokenAndCostBreakdowns(t *testing.T) {
 	}
 }
 
+func TestAnalysisDistributionIncludesTokenBreakdownsAcrossBuckets(t *testing.T) {
+	database := openTestDB(t)
+	first := requestEvent("scope-a", eventStart)
+	first.Cost = billing.Cost{UncachedInputTokens: 100, CacheReadTokens: 300, CacheWriteTokens: 50, BilledOutputTokens: 50}
+	failed := requestEvent("scope-a", eventStart.Add(75*time.Minute))
+	failed.Cost = billing.Cost{UncachedInputTokens: 400, CacheReadTokens: 100, BilledOutputTokens: 100}
+	zeroInput := requestEvent("scope-b", eventStart)
+	zeroInput.BillingModel, zeroInput.Account = "output-only", "zero@example.com"
+	zeroInput.Cost = billing.Cost{BilledOutputTokens: 40}
+	outside := requestEvent("scope-a", eventStart.Add(2*time.Hour))
+	mustSave(t, database, billing.NewState(), billing.Changes{
+		NormalRequestEvents: []billing.RequestEvent{first, zeroInput, outside},
+		RequestErrorEvents:  []billing.RequestErrorEvent{{Event: failed}},
+	})
+
+	query := billing.RequestEventQuery{From: eventStart, To: eventStart.Add(2 * time.Hour)}
+	view, err := database.Analysis(query, eventStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, rows := range map[string][]billing.AnalysisComposition{
+		"keys": view.UsageDistribution.APIKeys, "models": view.UsageDistribution.Models, "sources": view.UsageDistribution.Sources,
+	} {
+		if len(rows) != 2 {
+			t.Fatalf("%s distribution = %+v", name, rows)
+		}
+		row := rows[0]
+		if row.Requests != 2 || row.TotalTokens != 1100 || row.InputTokens != 950 || row.OutputTokens != 150 ||
+			row.CacheReadTokens != 400 || row.CacheWriteTokens != 50 {
+			t.Errorf("%s token breakdown = %+v", name, row)
+		}
+		zero := rows[1]
+		if zero.InputTokens != 0 || zero.OutputTokens != 40 || zero.TotalTokens != 40 || zero.CacheReadTokens != 0 || zero.CacheWriteTokens != 0 {
+			t.Errorf("%s output-only breakdown = %+v", name, zero)
+		}
+	}
+	query.Scope = "scope-a"
+	scoped, err := database.Analysis(query, eventStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scoped.UsageDistribution.APIKeys) != 0 || len(scoped.UsageDistribution.Models) != 1 || len(scoped.UsageDistribution.Sources) != 1 ||
+		scoped.UsageDistribution.Models[0].InputTokens != 950 || scoped.UsageDistribution.Sources[0].CacheReadTokens != 400 {
+		t.Fatalf("scoped distribution = %+v", scoped.UsageDistribution)
+	}
+}
+
 func TestAnalysisFullRetentionKeepsZeroUsageAndEmptyScopes(t *testing.T) {
 	d := openTestDB(t)
 	location, err := time.LoadLocation("America/New_York")

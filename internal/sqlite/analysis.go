@@ -143,6 +143,10 @@ func (groups analysisGroups) add(key string, part billing.AnalysisSummary) {
 	row := groups[key]
 	row.Requests += part.Requests
 	row.TotalTokens += part.TotalTokens
+	row.InputTokens += part.InputTokens
+	row.OutputTokens += part.OutputTokens
+	row.CacheReadTokens += part.CacheReadTokens
+	row.CacheWriteTokens += part.CacheWriteTokens
 	row.CostUSD += part.Cost.TotalUSD
 }
 
