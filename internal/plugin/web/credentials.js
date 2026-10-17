@@ -4,10 +4,9 @@ const CONFIGURED_CREDENTIAL_FIELDS = [
   ["claude-api-key", "claude", "claude:apikey", true],
   ["codex-api-key", "codex", "codex:apikey", true],
   ["xai-api-key", "xai", "xai:apikey", true],
+  ["meta-api-key", "meta", "meta:apikey", true],
   ["vertex-api-key", "vertex", "vertex:apikey", false]
 ];
-
-function configuredEntryEnabled(entry) { return entry.disabled !== true && (entry.weight ?? 1) > 0; }
 
 function sortedConfiguredHeaders(headers) {
   if (!headers) return "";
@@ -89,7 +88,7 @@ function parseConfiguredAPIKeys(config) {
 }
 
 function configuredCredentialEntries(config, field) {
-  const entries = config[field] === null ? [] : requireArray(config[field], field);
+  const entries = config[field] == null ? [] : requireArray(config[field], field);
   const validateEntry = (entry) => {
     requireObject(entry, field);
     for (const key of ["api-key", "base-url", "proxy-url", "prefix", "name"])
@@ -98,6 +97,11 @@ function configuredCredentialEntries(config, field) {
       throw new UIError(m("ui.invalid_enabled_state_for_value", { v0: field }));
     if (entry.weight != null && (typeof entry.weight !== "number" || !Number.isFinite(entry.weight)))
       throw new UIError(m("ui.invalid_weight_for_value", { v0: field }));
+    if (
+      entry["excluded-models"] != null &&
+      (!Array.isArray(entry["excluded-models"]) || entry["excluded-models"].some((model) => typeof model !== "string"))
+    )
+      throw new UIError(m("ui.invalid_configuration_for_value", { v0: field }));
     if (entry.headers != null) {
       requireObject(entry.headers, field);
       if (Object.values(entry.headers).some((value) => typeof value !== "string"))
@@ -129,25 +133,26 @@ async function parseConfiguredCredentials(config) {
         ref: await configuredCredentialRef(kind, parts, counters),
         provider,
         display_name: previewCredential(apiKey),
-        disabled: !configuredEntryEnabled(entry)
+        disabled: (entry["excluded-models"] || []).some((model) => model.trim() === "*")
       });
     }
   }
 
   for (const entry of configuredCredentialEntries(config, "openai-compatibility")) {
+    // CPA does not create runtime credentials or consume IDs for disabled providers.
+    if (entry.disabled === true) continue;
     const providerName = (entry.name || "").trim().toLowerCase() || "openai-compatibility";
     const provider =
       providerName === "openai-compatibility" || providerName.startsWith("openai-compatible-")
         ? providerName
         : "openai-compatible-" + providerName;
     const apiKeys = entry["api-key-entries"] || [];
-    const parentEnabled = entry.disabled !== true;
     if (!apiKeys.length) {
       credentials.push({
         ref: await configuredCredentialRef("openai-compatibility:" + providerName, [entry["base-url"]], counters),
         provider,
         display_name: "",
-        disabled: !parentEnabled
+        disabled: false
       });
       continue;
     }
@@ -161,7 +166,7 @@ async function parseConfiguredCredentials(config) {
         ),
         provider,
         display_name: previewCredential(apiKey),
-        disabled: !parentEnabled || !configuredEntryEnabled(apiKeyEntry)
+        disabled: false
       });
     }
   }
