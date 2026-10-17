@@ -38,6 +38,7 @@ function showGate(mode, error) {
   }
   authKey = "";
   currentRole = "";
+  updateRefreshControls();
   document.body.classList.remove("privacy-masked");
   $("app").classList.add("hidden");
   $("account-app").classList.add("hidden");
@@ -129,6 +130,7 @@ function restoreRolePreferences(role) {
   restoreChoice(role, prefix + "request-event-status", "");
   restoreChoice(role, prefix + "auth-enabled-only", true);
   restoreChoice(role, prefix + "auth-provider", "");
+  restoreChoice(role, prefix + "auto-refresh", "0");
   setPrivacyMask(role, viewPreference(role, prefix + "privacy-mask", false));
   if (!account) {
     restoreChoice(role, "analysis-key", "", true);
@@ -260,10 +262,16 @@ for (const element of document.querySelectorAll(".head, #admin-data-status, #acc
 
 function updatePageControls(account, page) {
   const prefix = account ? "account-" : "";
+  const actions = $(prefix + "page-tab-actions");
+  const keyed = !account && page.sources.includes(eventKeysQuery);
+  actions.dataset.page = activeTab(account);
+  actions.classList.toggle("has-key-filter", keyed);
   $(prefix + "shared-time-filter").classList.toggle("hidden", !page.timeRange);
+  $(prefix + "auto-refresh-control").classList.toggle("hidden", !page.autoRefresh);
   $(prefix + "events-export").classList.toggle("hidden", !page.exportEvents);
-  if (!account) $("shared-key-filter").classList.toggle("hidden", !page.sources.includes(eventKeysQuery));
+  if (!account) $("shared-key-filter").classList.toggle("hidden", !keyed);
   if (!page.timeRange) closeSharedTimePopover(account);
+  updateRefreshControls();
   schedulePageTabLayout();
 }
 
@@ -334,10 +342,6 @@ function updateThemedVisuals() {
   if (currentRole && activeTab(currentRole === "account") === "analysis") renderAnalysis(currentRole === "account");
 }
 
-for (const button of document.querySelectorAll('[data-page-action="refresh"]')) {
-  setActionIcon(button, "refresh", m("ui.refresh"));
-  button.onclick = () => refreshPage();
-}
 document.querySelectorAll('[data-page-action="theme"]').forEach((button) => {
   button.onclick = () => {
     window.billingTheme?.cycle();
@@ -422,33 +426,6 @@ window.addEventListener("billing-language-change", () => {
   renderPage();
   schedulePageTabLayout();
 });
-
-function updateRefreshButtons() {
-  const page = currentPage();
-  const label = currentRole
-    ? document.querySelector(currentRole === "account" ? "[data-account-tab].active" : "[data-tab].active")?.textContent.trim()
-    : "";
-  for (const button of document.querySelectorAll('[data-page-action="refresh"]')) {
-    button.disabled = !!page?.task;
-    setTextAttribute(
-      button,
-      "data-tip",
-      setTextAttribute(button, "aria-label", label ? m("ui.refresh_value", { v0: label }) : m("ui.refresh"))
-    );
-  }
-}
-
-function refreshPage() {
-  if (!currentRole) return Promise.resolve();
-  return currentPage().task || guard(() => loadPage(currentRole === "account", { reload: true }));
-}
-
-const PAGE_STALE_MS = 5 * 60 * 1000;
-function refreshStalePage() {
-  if (currentPage()?.sources.some((source) => source.readAt && Date.now() - source.readAt >= PAGE_STALE_MS)) return refreshPage();
-}
-
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshStalePage(); });
 
 for (const role of ["admin", "account"]) {
   const button = privacyMaskButton(role);

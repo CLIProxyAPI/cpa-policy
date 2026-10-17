@@ -116,6 +116,7 @@ function createQuery(label, receive = (value) => value) {
           }
         });
       query.task = task;
+      updateRefreshControls();
       return task;
     }
   };
@@ -655,6 +656,7 @@ function createPages(role) {
   const result = {
     analysis: {
       timeRange: true,
+      autoRefresh: true,
       queries: [data.analysis, data.speed],
       load: (reload) => loadAnalysis(account, reload),
       renderStatus: () => renderAnalysis(account),
@@ -662,18 +664,21 @@ function createPages(role) {
     },
     "request-events": {
       timeRange: true,
+      autoRefresh: true,
       exportEvents: true,
       list: pagedLists[role].events,
       sections: [keyedSection(["events"], () => renderRequestEvents(account))]
     },
     errors: {
       timeRange: true,
+      autoRefresh: true,
       exportEvents: true,
       list: pagedLists[role].errors,
       sections: [keyedSection(["errors"], () => renderErrors(account))]
     },
     "auth-files": {
       timeRange: true,
+      autoRefresh: true,
       queries: [data.authFiles],
       load: (reload) => readAuthFiles(account, reload),
       sections: [section(["authFiles"], () => renderAuthFiles(account))]
@@ -732,7 +737,7 @@ function renderPage() {
   const page = currentPage();
   if (!page) return;
   const account = currentRole === "account";
-  updateRefreshButtons();
+  updateRefreshControls();
   renderDataNotice();
   if (account && !renderAccountProfile()) return;
   for (const section of page.sections) {

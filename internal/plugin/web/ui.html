@@ -78,20 +78,22 @@
               <button type="button" class="icon-action" data-page-action="refresh" aria-label="Refresh" data-i18n-aria-label="ui.refresh"></button>
             </div>
           </nav>
-          <div class="page-tab-actions hidden">
-            <div id="shared-time-filter" class="shared-time-filter hidden">
-              <span id="shared-key-filter" class="native-select mask-select">
-                <select id="analysis-key" aria-label="Filter by API key" data-i18n-aria-label="ui.filter_by_api_key"> <option value="" data-i18n="ui.all_api_keys">All API keys</option> </select>
-              </span>
-              <div class="time-range-control">
-                <button id="shared-time-trigger" class="time-range-trigger" type="button" aria-haspopup="dialog" aria-expanded="false">
-                  <span class="time-range-icon" data-lucide-icon="clock" aria-hidden="true"></span>
-                  <span id="shared-time-label" data-i18n="ui.last_30_days">Last 30 days</span>
-                  <span class="time-range-chevron" data-lucide-icon="chevron-down" aria-hidden="true"></span>
-                </button>
-                <div id="shared-time-popover" class="time-range-popover hidden" role="dialog" aria-label="Select time range" data-i18n-aria-label="ui.select_time_range"></div>
-              </div>
+          <div id="page-tab-actions" class="page-tab-actions hidden">
+            <span id="shared-key-filter" class="native-select mask-select page-key-filter hidden">
+              <select id="analysis-key" aria-label="Filter by API key" data-i18n-aria-label="ui.filter_by_api_key"> <option value="" data-i18n="ui.all_api_keys">All API keys</option> </select>
+            </span>
+            <div id="shared-time-filter" class="time-range-control hidden">
+              <button id="shared-time-trigger" class="time-range-trigger" type="button" aria-haspopup="dialog" aria-expanded="false">
+                <span class="time-range-icon" data-lucide-icon="clock" aria-hidden="true"></span>
+                <span id="shared-time-label" data-i18n="ui.last_30_days">Last 30 days</span>
+                <span class="time-range-chevron" data-lucide-icon="chevron-down" aria-hidden="true"></span>
+              </button>
+              <div id="shared-time-popover" class="time-range-popover hidden" role="dialog" aria-label="Select time range" data-i18n-aria-label="ui.select_time_range"></div>
             </div>
+            <span id="auto-refresh-control" class="native-select auto-refresh-control hidden">
+              <span class="native-select-icon" data-lucide-icon="timer" aria-hidden="true"></span>
+              <select id="auto-refresh" aria-label="Auto refresh interval" data-i18n-aria-label="ui.auto_refresh_interval"></select>
+            </span>
             <button id="events-export" class="labeled-icon-button hidden" type="button" data-tip="Export" data-i18n-data-tip="ui.export" data-i18n="ui.export">Export</button>
           </div>
         </div>
@@ -339,23 +341,25 @@
                 <button type="button" class="icon-action" data-page-action="refresh" aria-label="Refresh" data-i18n-aria-label="ui.refresh"></button>
               </div>
             </nav>
-            <div class="page-tab-actions hidden">
-              <div id="account-shared-time-filter" class="shared-time-filter hidden">
-                <div class="time-range-control">
-                  <button
-                    id="account-shared-time-trigger"
-                    class="time-range-trigger"
-                    type="button"
-                    aria-haspopup="dialog"
-                    aria-expanded="false"
-                  >
-                    <span class="time-range-icon" data-lucide-icon="clock" aria-hidden="true"></span>
-                    <span id="account-shared-time-label" data-i18n="ui.last_30_days">Last 30 days</span>
-                    <span class="time-range-chevron" data-lucide-icon="chevron-down" aria-hidden="true"></span>
-                  </button>
-                  <div id="account-shared-time-popover" class="time-range-popover hidden" role="dialog" aria-label="Select time range" data-i18n-aria-label="ui.select_time_range"></div>
-                </div>
+            <div id="account-page-tab-actions" class="page-tab-actions hidden">
+              <div id="account-shared-time-filter" class="time-range-control hidden">
+                <button
+                  id="account-shared-time-trigger"
+                  class="time-range-trigger"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-expanded="false"
+                >
+                  <span class="time-range-icon" data-lucide-icon="clock" aria-hidden="true"></span>
+                  <span id="account-shared-time-label" data-i18n="ui.last_30_days">Last 30 days</span>
+                  <span class="time-range-chevron" data-lucide-icon="chevron-down" aria-hidden="true"></span>
+                </button>
+                <div id="account-shared-time-popover" class="time-range-popover hidden" role="dialog" aria-label="Select time range" data-i18n-aria-label="ui.select_time_range"></div>
               </div>
+              <span id="account-auto-refresh-control" class="native-select auto-refresh-control hidden">
+                <span class="native-select-icon" data-lucide-icon="timer" aria-hidden="true"></span>
+                <select id="account-auto-refresh" aria-label="Auto refresh interval" data-i18n-aria-label="ui.auto_refresh_interval"></select>
+              </span>
               <button id="account-events-export" class="labeled-icon-button hidden" type="button" data-tip="Export" data-i18n-data-tip="ui.export" data-i18n="ui.export">Export</button>
             </div>
           </div>
@@ -531,6 +535,7 @@
       /*logs.js*/
       /*auth-files.js*/
       /*account.js*/
+      /*refresh.js*/
       /*app.js*/
     </script>
   </body>
