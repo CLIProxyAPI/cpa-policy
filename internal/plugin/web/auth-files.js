@@ -25,20 +25,23 @@ function authFileQuota(file, owner) {
   const observed = file.quota;
   if (!manual) return observed;
   if (!observed) return manual;
-  const rows = new Map(manual.quota.map((row) => [authQuotaRowKey(row), row]));
-  for (const row of observed.quota) {
-    // A manual query is a complete snapshot, including windows that no longer exist.
-    if (!(new Date(row.observed_at) > new Date(manual.fetched_at))) continue;
-    const previous = rows.get(authQuotaRowKey(row));
-    if (!previous || new Date(row.observed_at) > new Date(previous.observed_at || manual.fetched_at)) rows.set(authQuotaRowKey(row), row);
-  }
-  const result = { ...observed, ...manual, quota: [...rows.values()] };
+  // Both sources list every window of a limit at once, so a limit observed after the manual query replaces its windows.
+  const newer = observed.quota.filter((row) => new Date(row.observed_at) > new Date(manual.fetched_at));
+  const replaced = new Set(newer.map(authQuotaLimitKey));
+  const limits = new Set([...manual.quota, ...newer].map(authQuotaLimitKey));
+  const quota = [...limits].flatMap((limit) =>
+    (replaced.has(limit) ? newer : manual.quota).filter((row) => authQuotaLimitKey(row) === limit)
+  );
+  const result = { ...observed, ...manual, quota };
   for (const field of ["plan", "credit_balance", "credits_unlimited"])
     if (new Date(observed[field + "_observed_at"]) > new Date(manual.fetched_at)) result[field] = observed[field];
   return result;
 }
 
-function authQuotaRowKey(row) { return JSON.stringify([row.group_label || "", row.label_prefix || "", row.label || ""]); }
+// Windows a provider reports together share a limit key; any other row stands alone.
+function authQuotaLimitKey(row) {
+  return JSON.stringify(row.limit_key ? [row.limit_key] : [row.group_label || "", row.label_prefix || "", row.label || ""]);
+}
 
 function authFileRoutingTag(file) {
   const priority = Number.isFinite(file.priority) ? file.priority : "—";
@@ -92,7 +95,7 @@ function authUI(account) {
   };
 }
 
-const AUTH_QUOTA_CACHE_PREFIX = "cpa-key-billing.auth-quotas.v6.";
+const AUTH_QUOTA_CACHE_PREFIX = "cpa-key-billing.auth-quotas.v7.";
 
 function resetAuthQuotaMemory(account) {
   const role = account ? "account" : "admin";

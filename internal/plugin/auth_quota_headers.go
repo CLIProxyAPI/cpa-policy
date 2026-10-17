@@ -1,9 +1,11 @@
 package plugin
 
 import (
+	"maps"
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +26,7 @@ type quotaHeaderSample struct {
 
 type quotaHeaderWindow struct {
 	prefix      string
+	limitKey    string
 	labelPrefix string
 	role        string
 	seconds     int64
@@ -95,7 +98,7 @@ func parseQuotaHeaders(provider string, input http.Header, at time.Time) quotaHe
 				continue
 			}
 			sample.windows = append(sample.windows, quotaHeaderWindow{prefix: prefix, role: window.role, seconds: window.seconds,
-				usedPercent: used * 100, resetAt: quotaHeaderReset(headers, prefix+window.role+"-", "Reset", at), meter: claudeUnifiedMeter(window.role)})
+				usedPercent: used * 100, resetAt: quotaHeaderReset(headers, prefix+window.role+"-", "Reset", at), limitKey: claudeUnifiedLimit, meter: claudeUnifiedMeter(window.role)})
 		}
 	}
 	return sample
@@ -109,7 +112,7 @@ func (s *quotaHeaderSample) appendCodexWindows(headers http.Header, prefix strin
 		if !ok || used < 0 || err != nil || minutes <= 0 || minutes > 366*24*60 {
 			continue
 		}
-		s.windows = append(s.windows, quotaHeaderWindow{prefix: prefix, labelPrefix: limit.labelPrefix, role: role, seconds: minutes * 60,
+		s.windows = append(s.windows, quotaHeaderWindow{prefix: prefix, limitKey: limit.key, labelPrefix: limit.labelPrefix, role: role, seconds: minutes * 60,
 			usedPercent: used, resetAt: quotaHeaderReset(headers, key, "Reset-At", at), meter: limit.meter(role)})
 	}
 }
@@ -164,7 +167,7 @@ func (s quotaHeaderSample) quota(at time.Time) authQuotaResponse {
 			windows = append(windows, value)
 			end++
 		}
-		appendQuotaWindows(&result, s.windows[start].labelPrefix, windows)
+		appendQuotaWindows(&result, s.windows[start].limitKey, s.windows[start].labelPrefix, windows)
 		start = end
 	}
 	for i := range result.Quota {
@@ -195,9 +198,15 @@ func quotaLimitAlias(value string) string {
 	return strings.TrimPrefix(value, "codex")
 }
 
+// observedAuthQuota rebuilds a credential's quota from its recorded reports,
+// oldest first. A report lists every window of each limit it carries, so the
+// newest report of a limit replaces all windows earlier reports gave it, and a
+// window the provider dropped, such as the 5-hour window after a plan change,
+// disappears.
 func observedAuthQuota(category, revision string, observations []billing.QuotaHeaderObservation) *authQuotaResponse {
 	var result *authQuotaResponse
-	positions := make(map[string]int)
+	var limits []string
+	windows := make(map[string][]quotaRow)
 	for _, observation := range observations {
 		if !strings.EqualFold(observation.Provider, category) {
 			continue
@@ -220,14 +229,17 @@ func observedAuthQuota(category, revision string, observations []billing.QuotaHe
 		if !decoded.CreditsUnlimitedObservedAt.IsZero() {
 			result.CreditsUnlimited, result.CreditsUnlimitedObservedAt = decoded.CreditsUnlimited, observation.At
 		}
+		reported := make(map[string][]quotaRow)
 		for _, row := range decoded.Quota {
-			if i, exists := positions[row.Label]; exists {
-				result.Quota[i] = row
-			} else {
-				positions[row.Label] = len(result.Quota)
-				result.Quota = append(result.Quota, row)
+			if !slices.Contains(limits, row.LimitKey) {
+				limits = append(limits, row.LimitKey)
 			}
+			reported[row.LimitKey] = append(reported[row.LimitKey], row)
 		}
+		maps.Copy(windows, reported)
+	}
+	for _, limit := range limits {
+		result.Quota = append(result.Quota, windows[limit]...)
 	}
 	return result
 }

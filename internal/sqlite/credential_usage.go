@@ -122,7 +122,7 @@ func (d *DB) credentialUsageStats(filter string, args []any) (map[string]billing
 }
 
 func (d *DB) credentialQuotaObservations(filter string, args []any) (map[string][]billing.QuotaHeaderObservation, error) {
-	// Keep each window's fields from the same report when only some windows update.
+	// The newest report carrying each header includes the newest report of every limit.
 	rows, err := d.db.Query(`WITH headers AS (
 		SELECT r.id, r.auth_index, r.provider, r.at, lower(h.key) AS key,
 			CASE h.type WHEN 'text' THEN h.value WHEN 'array' THEN json_extract(h.value, '$[0]') END AS value

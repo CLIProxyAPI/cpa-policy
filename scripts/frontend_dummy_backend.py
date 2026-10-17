@@ -507,12 +507,13 @@ AUTH_FILE_QUOTAS = {
             {"expires_at": iso(NOW + timedelta(days=14, hours=10))},
         ],
         "quota": [
-            quota_row("周限额", 62, 432000, **quota_usage(48_612_340, 36.2)),
+            quota_row("周限额", 62, 432000, limit_key="codex", **quota_usage(48_612_340, 36.2)),
             quota_row(
                 "5 小时限额",
                 100,
                 18000,
                 label_prefix="GPT-5.3-Codex-Spark ",
+                limit_key="GPT-5.3-Codex-Spark",
                 **quota_usage(0, 0),
             ),
             quota_row(
@@ -520,6 +521,7 @@ AUTH_FILE_QUOTAS = {
                 100,
                 604800,
                 label_prefix="GPT-5.3-Codex-Spark ",
+                limit_key="GPT-5.3-Codex-Spark",
                 **quota_usage(0, 0),
             ),
         ],
@@ -530,16 +532,16 @@ AUTH_FILE_QUOTAS = {
         "rate_limit_reset_credits_available_count": 1,
         "rate_limit_reset_credits": [{"expires_at": iso(NOW + timedelta(days=7))}],
         "quota": [
-            quota_row("5 小时限额", 35, 14400, **quota_usage(12_408_115, 9.86)),
-            quota_row("周限额", 90, 518400, **quota_usage(18_930_552, 15.31)),
+            quota_row("5 小时限额", 35, 14400, limit_key="codex", **quota_usage(12_408_115, 9.86)),
+            quota_row("周限额", 90, 518400, limit_key="codex", **quota_usage(18_930_552, 15.31)),
         ],
     },
     "auth-demo-claude": {
         "plan": "Team",
         "rate_limit_reset_credits_available_count": 1,
         "quota": [
-            quota_row("5 小时限额", 76, 12600, **quota_usage(3_104_822, 8.42)),
-            quota_row("周限额", 59, 388800, **quota_usage(21_733_906, 57.8)),
+            quota_row("5 小时限额", 76, 12600, limit_key="unified", **quota_usage(3_104_822, 8.42)),
+            quota_row("周限额", 59, 388800, limit_key="unified", **quota_usage(21_733_906, 57.8)),
             {
                 "label": "额外用量",
                 "used": 12.5,

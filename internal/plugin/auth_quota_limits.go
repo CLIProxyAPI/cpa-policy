@@ -23,19 +23,19 @@ type quotaMeter struct {
 // those an additional limit meters; Codex names each additional limit after
 // its model. Code Review meters reviews, which never pass through CLIProxyAPI.
 type codexLimit struct {
-	labelPrefix, model string
+	key, labelPrefix, model string
 }
 
 var (
-	codexMainLimit       = codexLimit{}
-	codexCodeReviewLimit = codexLimit{labelPrefix: "Code Review "}
+	codexMainLimit       = codexLimit{key: "codex"}
+	codexCodeReviewLimit = codexLimit{key: "code-review", labelPrefix: "Code Review "}
 )
 
 func codexAdditionalLimit(name string) codexLimit {
 	if name == "" {
-		return codexLimit{labelPrefix: "Additional "}
+		return codexLimit{key: "additional", labelPrefix: "Additional "}
 	}
-	return codexLimit{labelPrefix: name + " ", model: name}
+	return codexLimit{key: name, labelPrefix: name + " ", model: name}
 }
 
 func (limit codexLimit) meter(role string) *quotaMeter {
@@ -48,8 +48,10 @@ func (limit codexLimit) meter(role string) *quotaMeter {
 	return nil
 }
 
-// claudeUnifiedMeter meters a window of Claude's unified limit, which covers
-// every model and reports its utilization on each request.
+// claudeUnifiedLimit keys the 5-hour and weekly windows of Claude's unified
+// limit, which covers every model and reports its utilization on each request.
+const claudeUnifiedLimit = "unified"
+
 func claudeUnifiedMeter(role string) *quotaMeter {
 	return &quotaMeter{usedPercent: &billing.QuotaHeaderValue{Name: "Anthropic-Ratelimit-Unified-" + role + "-Utilization", Scale: 100}}
 }

@@ -85,7 +85,7 @@ func TestObservedQuotaUsageStartsAfterEarlyResetAndSkipsAdditionalLimitModels(t 
 	}
 }
 
-func TestFetchedQuotaUsageCoversModelFamilyWindowsUpToTheFetch(t *testing.T) {
+func TestFetchedQuotaKeysUnifiedWindowsAndCoversModelFamilies(t *testing.T) {
 	app, _ := newAppWithPriceAndState(t, true)
 	now := app.store.Now()
 	for _, event := range []struct {
@@ -122,18 +122,24 @@ func TestFetchedQuotaUsageCoversModelFamilyWindowsUpToTheFetch(t *testing.T) {
 	}
 	var result struct {
 		Quota []struct {
-			Label string                    `json:"label"`
-			Usage *billing.QuotaPeriodUsage `json:"usage"`
+			Label    string                    `json:"label"`
+			LimitKey string                    `json:"limit_key"`
+			Usage    *billing.QuotaPeriodUsage `json:"usage"`
 		} `json:"quota"`
 	}
 	if err := json.Unmarshal(response.Body, &result); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int64{"5-hour limit": 300, "Opus weekly limit": 500, "OAuth Apps weekly limit": -1}
+	// Only the unified windows are reported together; observed reports replace them and nothing else.
+	want := map[string]struct {
+		limitKey string
+		tokens   int64
+	}{"5-hour limit": {claudeUnifiedLimit, 300}, "Opus weekly limit": {"", 500}, "OAuth Apps weekly limit": {"", -1}}
 	for _, row := range result.Quota {
-		tokens, ok := want[row.Label]
-		if !ok || tokens < 0 && row.Usage != nil || tokens >= 0 && (row.Usage == nil || row.Usage.Tokens != tokens) {
-			t.Fatalf("%s usage = %+v", row.Label, row.Usage)
+		expected, ok := want[row.Label]
+		if !ok || row.LimitKey != expected.limitKey || expected.tokens < 0 && row.Usage != nil ||
+			expected.tokens >= 0 && (row.Usage == nil || row.Usage.Tokens != expected.tokens) {
+			t.Fatalf("%s: limit %q, usage %+v", row.Label, row.LimitKey, row.Usage)
 		}
 		delete(want, row.Label)
 	}

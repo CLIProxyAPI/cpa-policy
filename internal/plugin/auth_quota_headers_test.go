@@ -11,7 +11,7 @@ import (
 	"cpa-key-billing/internal/billing"
 )
 
-func TestUsageQuotaPersistsPartialWindowsAndScopedStatistics(t *testing.T) {
+func TestUsageQuotaFollowsLatestLimitWindowsAndScopedStatistics(t *testing.T) {
 	app, path := newAppWithPriceAndState(t, true)
 	at := app.store.Now().Add(-time.Hour).Truncate(time.Second)
 	headers := http.Header{
@@ -28,8 +28,10 @@ func TestUsageQuotaPersistsPartialWindowsAndScopedStatistics(t *testing.T) {
 	publishUsageRecord(t, app, record)
 	record.RequestedAt = at.Add(time.Minute)
 	record.APIKey = "sk-dummy-two"
+	// After an upgrade to Pro the main limit has only a weekly window.
 	record.ResponseHeaders = http.Header{
-		"X-Codex-Primary-Used-Percent": {"35"}, "X-Codex-Primary-Window-Minutes": {"300"},
+		"X-Codex-Plan-Type":            {"prolite"},
+		"X-Codex-Primary-Used-Percent": {"35"}, "X-Codex-Primary-Window-Minutes": {"10080"},
 		"X-Codex-Primary-Reset-After-Seconds": {"1740"},
 	}
 	record.Failed = true
@@ -64,13 +66,12 @@ func TestUsageQuotaPersistsPartialWindowsAndScopedStatistics(t *testing.T) {
 	quota := files[0].Quota
 	if files[0].Usage.Requests != 4 || files[0].Usage.Failed != 3 ||
 		files[0].Usage.InputTokens != 400 || files[0].Usage.CacheReadTokens != 200 || files[0].Usage.OutputTokens != 80 ||
-		quota == nil || len(quota.Quota) != 2 || quota.Plan != "Plus" {
+		quota == nil || len(quota.Quota) != 1 || quota.Plan != "Pro 100" {
 		t.Fatalf("credential view: %+v, quota: %+v", files[0], quota)
 	}
-	if *quota.Quota[0].RemainingPercent != 65 || *quota.Quota[1].RemainingPercent != 60 ||
-		!quota.Quota[0].ObservedAt.Equal(at.Add(time.Minute)) || !quota.Quota[1].ObservedAt.Equal(at) ||
-		quota.Quota[0].ResetAt != at.Add(30*time.Minute).UTC().Format(time.RFC3339) {
-		t.Fatalf("partial or late quota report changed windows: %+v", quota.Quota)
+	if row := quota.Quota[0]; row.Label != "Weekly limit" || *row.RemainingPercent != 65 || !row.ObservedAt.Equal(at.Add(time.Minute)) ||
+		row.ResetAt != at.Add(30*time.Minute).UTC().Format(time.RFC3339) {
+		t.Fatalf("dropped or late quota report changed windows: %+v", quota.Quota)
 	}
 	files, err = app.listAuthFiles(viewAccess{APIKey: true, Scope: billing.CallerScope("sk-dummy-one")}, time.Time{}, time.Time{})
 	if err != nil || files[0].Usage.Requests != 1 || files[0].Usage.Failed != 0 || files[0].Quota == nil {

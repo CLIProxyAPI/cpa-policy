@@ -90,6 +90,9 @@ type quotaRow struct {
 	Currency         string           `json:"currency,omitempty"`
 	ResetAt          string           `json:"reset_at,omitempty"`
 	ObservedAt       time.Time        `json:"observed_at,omitzero"`
+	// LimitKey names the limit whose windows a provider reports together, so a
+	// newer report of the limit replaces all of them. Other rows stand alone.
+	LimitKey string `json:"limit_key,omitempty"`
 	// Usage is what CLIProxyAPI requests consumed in the window's current period,
 	// which began windowSeconds before ResetAt.
 	Usage         *billing.QuotaPeriodUsage `json:"usage,omitempty"`
@@ -815,10 +818,10 @@ func appendCodexRateLimit(result *authQuotaResponse, limit codexLimit, info map[
 		}
 		windows = append(windows, window)
 	}
-	appendQuotaWindows(result, limit.labelPrefix, windows)
+	appendQuotaWindows(result, limit.key, limit.labelPrefix, windows)
 }
 
-func appendQuotaWindows(result *authQuotaResponse, labelPrefix string, windows []quotaWindow) {
+func appendQuotaWindows(result *authQuotaResponse, limitKey, labelPrefix string, windows []quotaWindow) {
 	sort.SliceStable(windows, func(i, j int) bool {
 		return windows[i].order() < windows[j].order()
 	})
@@ -838,7 +841,7 @@ func appendQuotaWindows(result *authQuotaResponse, labelPrefix string, windows [
 			label = strconv.FormatInt(seconds/60, 10) + " min"
 		}
 		result.Quota = append(result.Quota, quotaRow{Label: labelPrefix + label,
-			LabelMessage: messages.Literal(label), LabelPrefix: labelPrefix,
+			LabelMessage: messages.Literal(label), LabelPrefix: labelPrefix, LimitKey: limitKey,
 			RemainingPercent: window.RemainingPercent, ResetAt: window.ResetAt, windowSeconds: window.Seconds, meter: window.meter})
 	}
 }
@@ -891,17 +894,17 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 	fable := claudeFableLimit(usage)
 	const fiveHours, week = 5 * 60 * 60, 7 * 24 * 60 * 60
 	for _, window := range []struct {
-		key, label string
-		seconds    int64
-		meter      *quotaMeter
+		key, label, limit string
+		seconds           int64
+		meter             *quotaMeter
 	}{
-		{"five_hour", "5-hour limit", fiveHours, claudeUnifiedMeter("5h")},
-		{"seven_day", "Weekly limit", week, claudeUnifiedMeter("7d")},
-		{"seven_day_oauth_apps", "OAuth Apps weekly limit", week, nil},
-		{"seven_day_opus", "Opus weekly limit", week, claudeModelMeter("opus")},
-		{"seven_day_sonnet", "Sonnet weekly limit", week, claudeModelMeter("sonnet")},
-		{"seven_day_cowork", "Cowork weekly limit", week, nil},
-		{"iguana_necktie", "Iguana Necktie", 0, nil},
+		{"five_hour", "5-hour limit", claudeUnifiedLimit, fiveHours, claudeUnifiedMeter("5h")},
+		{"seven_day", "Weekly limit", claudeUnifiedLimit, week, claudeUnifiedMeter("7d")},
+		{"seven_day_oauth_apps", "OAuth Apps weekly limit", "", week, nil},
+		{"seven_day_opus", "Opus weekly limit", "", week, claudeModelMeter("opus")},
+		{"seven_day_sonnet", "Sonnet weekly limit", "", week, claudeModelMeter("sonnet")},
+		{"seven_day_cowork", "Cowork weekly limit", "", week, nil},
+		{"iguana_necktie", "Iguana Necktie", "", 0, nil},
 	} {
 		if window.key == "iguana_necktie" && fable != nil {
 			continue
@@ -911,7 +914,7 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 			continue
 		}
 		row := quotaRow{Label: window.label, LabelMessage: messages.Literal(window.label), ResetAt: quotaResetAt(firstString(value, "resets_at", "resetsAt")),
-			windowSeconds: window.seconds, meter: window.meter}
+			LimitKey: window.limit, windowSeconds: window.seconds, meter: window.meter}
 		if percent, ok := floatValue(value, "utilization"); ok {
 			row.RemainingPercent = remainingPercent(100 - percent)
 		}
