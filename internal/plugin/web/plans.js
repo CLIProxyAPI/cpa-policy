@@ -44,7 +44,7 @@ function renderPlans() {
         const quotas = settingsChipList(
           QUOTA_DIMENSIONS.filter((metric) => window[metric.key] > 0).map((metric) => ({
             text: metric.planValue(window[metric.key]),
-            hint: m("ui.metric_value", { v0: metric.label, v1: metric.exact(window[metric.key]) })
+            hint: metric.metric === "tokens" ? m("ui.metric_value", { v0: metric.label, v1: metric.exact(window[metric.key]) }) : null
           }))
         );
         if (window.cycle_anchor_at)

@@ -1480,8 +1480,8 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
 .key-route-cell { min-width: 125px; max-width: 190px; font-size: 12px; }
 .key-route-lines { display: grid; gap: 4px; }
 .key-route-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.65; }
-/* The cell describes every rule at once, so its chips stay out of the hover path. */
-.key-route-line .settings-chip { pointer-events: none; }
+/* Collapsed lists show every rule together; otherwise each chip handles its own overflow. */
+.key-route-lines[data-tip] .settings-chip { pointer-events: none; }
 .key-route-lines:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; border-radius: 4px; }
 .hover-tooltip {
   position: fixed;

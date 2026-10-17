@@ -140,7 +140,7 @@ function renderAPIKeyIdentity(view, options = {}) {
   const line = (text, className, children = []) => el("span", { class: "api-key-identity-line" + className }, maskedText(text), children);
   return el(
     "span",
-    { class: "api-key-identity" + (options.stacked ? " api-key-identity-stacked" : ""), "data-tip": identity.text },
+    { class: "api-key-identity" + (options.stacked ? " api-key-identity-stacked" : "") },
     line(identity.primary, "", identity.secondary ? [] : trailing),
     identity.secondary ? line(identity.secondary, " api-key-identity-secondary", trailing) : null
   );

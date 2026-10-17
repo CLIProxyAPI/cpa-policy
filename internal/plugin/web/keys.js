@@ -240,7 +240,7 @@ function renderKeyRoutes(view) {
     { class: "key-route-cell" },
     el(
       "div",
-      { class: "key-route-lines", ...hoverTooltipProps(tooltip, names.length) },
+      { class: "key-route-lines", ...hoverTooltipProps(tooltip, names.length > 3) },
       ...(names.length
         ? names.slice(0, 3).map((entry) => el("div", { class: "key-route-line" }, settingsChipList([entry])))
         : [el("div", { class: "key-route-line muted", text: m("ui.all_routes") })]),
