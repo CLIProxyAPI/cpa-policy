@@ -26,15 +26,14 @@ function authFileQuota(file, owner) {
   if (!manual) return observed;
   if (!observed) return manual;
   // A request reports only the windows of the limit it used, so a window observed after the manual query replaces
-  // just that window. A queried window drops out once its limit is observed after its reset time without it.
+  // just that window, in place. A queried window drops out once its limit is observed after its reset time without it.
   const newer = observed.quota.filter((row) => Date.parse(row.observed_at) > Date.parse(manual.fetched_at));
   const reportedAt = new Map();
   for (const row of newer) reportedAt.set(row.limit_key, Math.max(reportedAt.get(row.limit_key) ?? 0, Date.parse(row.observed_at)));
-  const windows = new Map(
-    manual.quota.filter((row) => !(reportedAt.get(row.limit_key) >= Date.parse(row.reset_at))).map((row) => [authQuotaWindowKey(row), row])
-  );
+  const windows = new Map(manual.quota.map((row) => [authQuotaWindowKey(row), row]));
   for (const row of newer) windows.set(authQuotaWindowKey(row), row);
-  const result = { ...observed, ...manual, quota: [...windows.values()] };
+  const quota = [...windows.values()].filter((row) => newer.includes(row) || !(reportedAt.get(row.limit_key) >= Date.parse(row.reset_at)));
+  const result = { ...observed, ...manual, quota };
   for (const field of ["plan", "credit_balance", "credits_unlimited"])
     if (Date.parse(observed[field + "_observed_at"]) > Date.parse(manual.fetched_at)) result[field] = observed[field];
   return result;
