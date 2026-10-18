@@ -456,14 +456,7 @@ def auth_file_views(files, query, scope=""):
     for index, item in enumerate(files):
         rows = [entry for entry in entries if entry["auth_index"] == item["auth_index"]]
         view = {field: value for field, value in item.items() if field != "weight"}
-        view["usage"] = {
-            "requests": len(rows), "failed": sum(bool(row.get("failed")) for row in rows),
-            "input_tokens": sum(sum(row["cost"].get(field, 0) for field in
-                                    ("uncached_input_tokens", "cache_read_tokens", "cache_write_tokens")) for row in rows),
-            "cache_read_tokens": sum(row["cost"].get("cache_read_tokens", 0) for row in rows),
-            "output_tokens": sum(row["cost"].get("billed_output_tokens", 0) for row in rows),
-            "cost_usd": sum(row["cost"].get("total_usd", 0) for row in rows),
-        }
+        view["usage"] = credential_usage(rows)
         if item["category"] in ("codex", "claude"):
             quota = auth_file_quota({"auth_index": [item["auth_index"]]})
             observed_at = iso(NOW - timedelta(minutes=6 + index))
@@ -482,6 +475,17 @@ def auth_file_views(files, query, scope=""):
                         quota_unavailable_message={"message_key": "backend.auth_file_is_disabled"})
         views.append(view)
     return views
+
+
+def credential_usage(rows):
+    return {
+        "requests": len(rows), "failed": sum(bool(row.get("failed")) for row in rows),
+        "input_tokens": sum(sum(row["cost"].get(field, 0) for field in
+                                ("uncached_input_tokens", "cache_read_tokens", "cache_write_tokens")) for row in rows),
+        "cache_read_tokens": sum(row["cost"].get("cache_read_tokens", 0) for row in rows),
+        "output_tokens": sum(row["cost"].get("billed_output_tokens", 0) for row in rows),
+        "cost_usd": sum(row["cost"].get("total_usd", 0) for row in rows),
+    }
 
 
 def quota_usage(tokens, cost_usd):
@@ -604,16 +608,110 @@ def auth_file_quota(query):
         "fetched_at": iso(NOW),
         **quota,
     }
+    result["quota"] = localized_quota_labels(result["quota"])
+    return result
+
+
+def localized_quota_labels(rows):
     english = json.loads((UI_DIR / "locales/en.json").read_text())
     chinese = json.loads((UI_DIR / "locales/zh-CN.json").read_text())
     labels = {value: key for key, value in chinese.items() if key.startswith("backend.") and "{" not in value}
-    result["quota"] = [dict(row) for row in result["quota"]]
-    for row in result["quota"]:
+    rows = [dict(row) for row in rows]
+    for row in rows:
         key = labels.get(row.get("label", ""))
         if key:
             row["label"] = row.get("label_prefix", "") + english[key]
             row["label_message"] = {"message_key": key}
-    return result
+    return rows
+
+
+def quota_period(start, length, used, tokens, cost_usd, plans=(), end=None, reason=""):
+    period = {"start": iso(start), "reset_at": iso(start + length), "used_percent": used,
+              "plans": list(plans), "usage": {"tokens": tokens, "cost_usd": cost_usd}}
+    if reason:
+        period.update(end=iso(end or start + length), end_reason=reason)
+    return period
+
+
+def daily_quota_periods(days, length, plans=(), skip=()):
+    """Past periods, one a day, with deterministic usage."""
+    periods = []
+    for day in days:
+        if day in skip:
+            continue
+        used = (day * 37) % 88 + 9
+        tokens = used * 187_431 + day * 1_237
+        periods.append(quota_period(NOW - timedelta(days=day, hours=9), length, used, tokens, round(tokens * 7.9e-7, 2),
+                                    plans, reason="scheduled"))
+    return periods
+
+
+FIVE_HOURS, WEEK = timedelta(hours=5), timedelta(days=7)
+# Plus until 17 days ago, Pro for a week without a 5-hour window, then Plus again with a reset card used 5 days ago.
+AUTH_FILE_HISTORY = {
+    "auth-demo-codex-plus": [
+        {"label": "5 小时限额", "periods": [
+            quota_period(NOW - timedelta(hours=1), FIVE_HOURS, 65, 12_408_115, 9.86, ["Plus"]),
+            *daily_quota_periods(range(1, 5), FIVE_HOURS, ["Plus"]),
+            quota_period(NOW - timedelta(days=5, hours=2), FIVE_HOURS, 31, 5_104_220, 4.02, ["Plus"], reason="scheduled"),
+            quota_period(NOW - timedelta(days=5, hours=6), FIVE_HOURS, 100, 15_220_418, 12.07, ["Plus"],
+                         end=NOW - timedelta(days=5, hours=2), reason="early_reset"),
+            *daily_quota_periods(range(6, 10), FIVE_HOURS, ["Plus"], skip={7}),
+            quota_period(NOW - timedelta(days=17, hours=2), FIVE_HOURS, 48, 6_920_331, 5.48, ["Plus", "Pro 100"], reason="scheduled"),
+            *daily_quota_periods(range(18, 31), FIVE_HOURS, ["Plus"], skip={21, 26}),
+        ]},
+        {"label": "周限额", "periods": [
+            quota_period(NOW - timedelta(days=1), WEEK, 10, 18_930_552, 15.31, ["Plus"]),
+            quota_period(NOW - timedelta(days=8, hours=6), WEEK, 87, 71_402_216, 56.48, ["Pro 100", "Plus"], reason="scheduled"),
+            quota_period(NOW - timedelta(days=17), WEEK, 64, 182_005_904, 143.88, ["Pro 100"],
+                         end=NOW - timedelta(days=9, hours=6), reason="early_reset"),
+            quota_period(NOW - timedelta(days=19, hours=4), WEEK, 72, 35_118_027, 27.76, ["Plus"],
+                         end=NOW - timedelta(days=17), reason="early_reset"),
+            quota_period(NOW - timedelta(days=26, hours=4), WEEK, 96, 47_906_315, 37.85, ["Plus"], reason="scheduled"),
+            quota_period(NOW - timedelta(days=33, hours=4), WEEK, 41, 20_455_108, 16.16, ["Plus"], reason="scheduled"),
+        ]},
+    ],
+    "auth-demo-codex-pro": [
+        {"label": "周限额", "periods": [
+            quota_period(NOW - timedelta(days=2), WEEK, 38, 48_612_340, 36.2, ["Pro 200"]),
+            *[quota_period(NOW - timedelta(days=2 + 7 * week), WEEK, 70 + week * 6, 90_402_118 + week * 7_301_224,
+                           round(67.31 + week * 5.44, 2), ["Pro 200"], reason="scheduled") for week in range(1, 5)],
+        ]},
+        {"label": "5 小时限额", "label_prefix": "GPT-5.3-Codex-Spark ", "periods": [
+            quota_period(NOW - timedelta(days=3, hours=4), FIVE_HOURS, 12, 1_204_877, 0.94, ["Pro 200"], reason="scheduled"),
+            quota_period(NOW - timedelta(days=11, hours=8), FIVE_HOURS, 4, 380_105, 0.3, ["Pro 200"], reason="scheduled"),
+        ]},
+        {"label": "周限额", "label_prefix": "GPT-5.3-Codex-Spark ", "periods": [
+            quota_period(NOW - timedelta(days=4), WEEK, 12, 1_584_982, 1.24, ["Pro 200"]),
+        ]},
+    ],
+    "auth-demo-claude": [
+        {"label": "5 小时限额", "periods": [
+            quota_period(NOW - timedelta(hours=1, minutes=30), FIVE_HOURS, 24, 3_104_822, 8.42),
+            *daily_quota_periods(range(1, 31), FIVE_HOURS, skip={4, 5, 11, 12, 18, 19, 25, 26}),
+        ]},
+        {"label": "周限额", "periods": [
+            quota_period(NOW - timedelta(days=2, hours=12), WEEK, 41, 21_733_906, 57.8),
+            *[quota_period(NOW - timedelta(days=2 + 7 * week, hours=12), WEEK, 55 + week * 9, 30_118_440 + week * 2_008_310,
+                           round(80.06 + week * 5.34, 2), reason="scheduled") for week in range(1, 5)],
+        ]},
+    ],
+}
+
+
+def auth_file_history(query, scope=""):
+    auth_index = query.get("auth_index", [""])[0]
+    if not any(item["auth_index"] == auth_index for item in AUTH_FILES):
+        return None
+    since = NOW - timedelta(days=30)
+    rows = [entry for entry in REQUEST_EVENTS if entry["auth_index"] == auth_index and (not scope or entry["scope"] == scope)
+            and datetime.fromisoformat(entry["at"].replace("Z", "+00:00")) >= since]
+    windows = []
+    for window in AUTH_FILE_HISTORY.get(auth_index, []):
+        localized = localized_quota_labels([window])[0]
+        localized["periods"] = sorted(window["periods"], key=lambda period: period["start"], reverse=True)
+        windows.append(localized)
+    return {"from": iso(since), "to": iso(NOW), "usage": credential_usage(rows), "windows": windows}
 
 
 KEY_PROFILES = [
@@ -1492,6 +1590,8 @@ def payload_for(path, query):
         return {"files": auth_file_views(AUTH_FILES, query)}
     if path == f"{API_BASE}/auth-files/quota":
         return auth_file_quota(query)
+    if path == f"{API_BASE}/auth-files/history":
+        return auth_file_history(query)
     if path == f"{API_BASE}/prices/reference":
         term = query.get("q", [""])[0].lower()
         return {"prices": [
@@ -1616,6 +1716,7 @@ class Handler(BaseHTTPRequestHandler):
             f"{RESOURCE_BASE}/auth-files",
             f"{RESOURCE_BASE}/auth-files/quota",
             f"{RESOURCE_BASE}/auth-files/quota/reset",
+            f"{RESOURCE_BASE}/auth-files/history",
         }
         if parsed.path in resource_paths:
             if not authorization.startswith("Bearer ") or authorization[7:] not in api_keys:
@@ -1651,6 +1752,14 @@ class Handler(BaseHTTPRequestHandler):
                 payload = auth_file_quota(query) if auth_index in allowed else None
                 if payload is None:
                     self.send_json(404, {"error": {"message": "认证文件不存在或不支持限额查询"}})
+                else:
+                    self.send_json(200, payload)
+            elif parsed.path.endswith("/auth-files/history"):
+                query = parse_qs(parsed.query)
+                allowed = {item["auth_index"] for item in account_auth_files(index)}
+                payload = auth_file_history(query, LIVE_KEYS[index]["scope"]) if query.get("auth_index", [""])[0] in allowed else None
+                if payload is None:
+                    self.send_json(404, {"error": {"message": "认证文件不存在"}})
                 else:
                     self.send_json(200, payload)
             elif parsed.path.endswith("/auth-files/quota/reset"):

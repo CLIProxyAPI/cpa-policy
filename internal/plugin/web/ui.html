@@ -26,7 +26,7 @@
             <button type="button" class="icon-action" data-page-action="theme" aria-label="Switch theme" data-i18n-aria-label="ui.switch_theme"></button>
           </div>
         </div>
-        <div class="access-switch" role="tablist" aria-label="Access method" data-i18n-aria-label="ui.access_method">
+        <div class="segmented-control" role="tablist" aria-label="Access method" data-i18n-aria-label="ui.access_method">
           <button id="gate-mode-admin" type="button" role="tab" aria-selected="true" class="active" data-i18n="ui.management_key">Management key</button>
           <button id="gate-mode-account" type="button" role="tab" aria-selected="false" data-i18n="ui.api_key_access">API key</button>
         </div>
@@ -502,6 +502,31 @@
       <div id="action-content" class="muted small" style="white-space: pre-line"></div>
       <input id="action-input" class="dialog-input" />
       <div class="row dialog-actions"> <button id="action-cancel" data-i18n="ui.cancel">Cancel</button> <button id="action-confirm" class="primary" data-i18n="ui.confirm">Confirm</button> </div>
+    </dialog>
+
+    <dialog id="auth-drawer" class="drawer" aria-labelledby="auth-drawer-title">
+      <header class="drawer-header">
+        <div id="auth-drawer-identity" class="drawer-identity"></div>
+        <button id="auth-drawer-close" type="button" class="labeled-icon-button round-icon-button" aria-label="Close" data-i18n-aria-label="ui.close"></button>
+      </header>
+      <div class="drawer-body">
+        <section class="drawer-section" aria-labelledby="auth-drawer-usage-title">
+          <h3 id="auth-drawer-usage-title" data-i18n="ui.last_30_days_usage">Usage in the last 30 days</h3>
+          <div id="auth-drawer-usage"></div>
+        </section>
+        <section id="auth-drawer-reset-section" class="drawer-section" aria-labelledby="auth-drawer-reset-title">
+          <div class="drawer-section-head">
+            <h3 id="auth-drawer-reset-title"><span data-i18n="ui.manual_resets">Manual resets</span><span id="auth-drawer-reset-count" class="auth-reset-count-badge"></span></h3>
+            <button id="auth-drawer-reset" type="button" class="labeled-icon-button"></button>
+          </div>
+          <div id="auth-drawer-resets"></div>
+        </section>
+        <section class="drawer-section" aria-labelledby="auth-drawer-windows-title">
+          <h3 id="auth-drawer-windows-title" data-i18n="ui.quota_windows">Quota windows</h3>
+          <div id="auth-drawer-window-switch" class="segmented-control" role="tablist" aria-labelledby="auth-drawer-windows-title"></div>
+          <div id="auth-drawer-periods" role="tabpanel" aria-labelledby="auth-drawer-windows-title"></div>
+        </section>
+      </div>
     </dialog>
 
     <div id="hover-tooltip" class="hover-tooltip" popover="manual" role="tooltip" tabindex="0"></div>

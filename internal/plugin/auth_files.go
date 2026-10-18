@@ -156,6 +156,21 @@ func (a *App) authQuota(req ManagementRequest, access viewAccess) ManagementResp
 	return viewJSON(access, http.StatusOK, result)
 }
 
+func (a *App) authFileHistory(req ManagementRequest, access viewAccess) ManagementResponse {
+	if access.APIKey && !access.Tracked {
+		return apiKeyUnauthorized()
+	}
+	selected, failure := a.resolveAuthFile(req, access)
+	if selected == nil {
+		return failure
+	}
+	history, err := a.readAuthFileHistory(quotaCredential{selected.AuthIndex, authCategory(selected.Type)}, access.usageScope())
+	if err != nil {
+		return viewErrorResponse(access, err)
+	}
+	return viewJSON(access, http.StatusOK, history)
+}
+
 // Resource routes are GET-only. Require a reset ID header and preserve it on retries.
 func (a *App) authQuotaReset(req ManagementRequest, access viewAccess) ManagementResponse {
 	if access.APIKey && !access.Tracked {
@@ -190,6 +205,22 @@ func (a *App) authQuotaReset(req ManagementRequest, access viewAccess) Managemen
 }
 
 func (a *App) resolveQuotaAuthFile(req ManagementRequest, access viewAccess) (*hostAuthFile, ManagementResponse) {
+	selected, failure := a.resolveAuthFile(req, access)
+	if selected == nil {
+		return nil, failure
+	}
+	if supported, reason := authQuotaAvailability(*selected, authCategory(selected.Type)); !supported {
+		code := "unsupported"
+		if selected.Disabled {
+			code = "disabled"
+		}
+		return nil, viewJSONError(access, http.StatusUnprocessableEntity, code, reason)
+	}
+	return selected, ManagementResponse{}
+}
+
+// resolveAuthFile finds the auth file a request names, among those the caller may see.
+func (a *App) resolveAuthFile(req ManagementRequest, access viewAccess) (*hostAuthFile, ManagementResponse) {
 	authIndex := strings.TrimSpace(req.Query.Get("auth_index"))
 	if authIndex == "" || len(authIndex) > 512 {
 		return nil, viewJSONError(access, http.StatusBadRequest, "invalid", "Invalid auth file identifier")
@@ -206,13 +237,6 @@ func (a *App) resolveQuotaAuthFile(req ManagementRequest, access viewAccess) (*h
 		if decision.ConfigurationError != "" || (decision.RestrictsCredentials() && !routingAllowsAuthFile(*selected, decision)) {
 			return nil, viewJSONError(access, http.StatusNotFound, "not_found", "Auth file does not exist")
 		}
-	}
-	if supported, reason := authQuotaAvailability(*selected, authCategory(selected.Type)); !supported {
-		code := "unsupported"
-		if selected.Disabled {
-			code = "disabled"
-		}
-		return nil, viewJSONError(access, http.StatusUnprocessableEntity, code, reason)
 	}
 	return selected, ManagementResponse{}
 }

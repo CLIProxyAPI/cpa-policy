@@ -265,13 +265,11 @@ function quotaLabel(row) {
     : group || fullLabel;
 }
 
-// Usage covers the window's current period. An estimate scales it to the whole window by the share already used,
+// Usage covers a window's period. An estimate scales it to the whole window by the share already used,
 // so it needs both a used share and recorded usage.
-function renderQuotaUsage(row, estimate) {
-  const usage = row.usage;
-  if (!usage) return null;
-  const used = 100 - row.remaining_percent;
-  const scale = !estimate ? 1 : used > 0 && usage.tokens > 0 ? 100 / used : 0;
+function quotaEstimateScale(usedPercent, usage) { return usedPercent > 0 && usage.tokens > 0 ? 100 / usedPercent : 0; }
+
+function renderQuotaMetrics(usage, scale = 1) {
   const total = Math.round(usage.tokens * scale);
   const metric = (icon, label, value, detail) =>
     el(
@@ -288,14 +286,29 @@ function renderQuotaUsage(row, estimate) {
   );
 }
 
+function renderQuotaBar(percent, label) {
+  const known = Number.isFinite(percent);
+  const level = percent >= 70 ? "high" : percent >= 30 ? "medium" : "low";
+  return el(
+    "div",
+    {
+      class: "bar",
+      role: "progressbar",
+      "aria-label": label,
+      "aria-valuemin": "0",
+      "aria-valuemax": "100",
+      "aria-valuenow": known ? Math.round(percent) : null
+    },
+    el("i", { class: "quota-fill " + (known ? level : "high"), style: "width:" + (known ? percent : 0) + "%" })
+  );
+}
+
 function renderQuotaRow(row, estimate) {
   const label = quotaLabel(row);
   const percent = row.remaining_percent;
-  const hasPercent = Number.isFinite(percent);
-  const level = percent >= 70 ? "high" : percent >= 30 ? "medium" : "low";
   const reset = quotaResetMeta(row);
   const elapsed = row.reset_at && new Date(row.reset_at).getTime() <= Date.now();
-  const usage = renderQuotaUsage(row, estimate);
+  const usage = row.usage && renderQuotaMetrics(row.usage, estimate ? quotaEstimateScale(100 - percent, row.usage) : 1);
   const amount = quotaAmount(row);
   return el(
     "div",
@@ -305,20 +318,9 @@ function renderQuotaRow(row, estimate) {
       { class: "auth-quota-head" },
       el("span", { class: "auth-quota-label", "data-tip": label, "data-tip-overflow": "", text: label }),
       reset.at && el("span", { class: "auth-quota-reset-after", text: elapsed ? m("ui.quota_reset_elapsed") : reset.after }),
-      el("span", { class: "auth-quota-value", text: hasPercent ? percent.toFixed(0) + "%" : "—" })
+      el("span", { class: "auth-quota-value", text: Number.isFinite(percent) ? percent.toFixed(0) + "%" : "—" })
     ),
-    el(
-      "div",
-      {
-        class: "bar",
-        role: "progressbar",
-        "aria-label": label,
-        "aria-valuemin": "0",
-        "aria-valuemax": "100",
-        "aria-valuenow": hasPercent ? Math.round(percent) : null
-      },
-      el("i", { class: "quota-fill " + (hasPercent ? level : "high"), style: "width:" + (hasPercent ? percent : 0) + "%" })
-    ),
+    renderQuotaBar(percent, label),
     (usage || amount || reset.at) &&
       el(
         "div",
@@ -395,13 +397,7 @@ function renderAuthFileQuota(file, account) {
     summary.push(el("span", { text: m("ui.credits_value", { v0: credits }) }));
   }
   if (Number.isFinite(result.rate_limit_reset_credits_available_count)) {
-    summary.push(
-      el("span", {
-        class: "auth-reset-count",
-        text: m("ui.available_resets_value", { v0: int(result.rate_limit_reset_credits_available_count) }),
-        ...hoverTooltipProps(() => [renderAuthResetCredits(file, result)], file.category === "codex")
-      })
-    );
+    summary.push(el("span", { text: m("ui.available_resets_value", { v0: int(result.rate_limit_reset_credits_available_count) }) }));
   }
   const rows = result.quota;
   return el(
@@ -417,6 +413,7 @@ function renderAuthFileQuota(file, account) {
 
 function renderAuthFiles(account) {
   const ui = authUI(account);
+  if ($("auth-drawer").open && authDrawer.account === account) renderAuthDrawerFile();
   if (renderDataPending(ui.body, [ui.files])) {
     ui.bulk.disabled = true;
     return;
@@ -454,7 +451,7 @@ function renderAuthFileRow(file, account) {
         "button",
         {
           type: "button",
-          class: "labeled-icon-button auth-quota-reset",
+          class: "labeled-icon-button round-icon-button",
           "aria-label": m("ui.reset_quota"),
           ...hoverTooltipProps(
             () => [el("span", { text: m("ui.reset_opportunities", { count: quota.rate_limit_reset_credits_available_count }) })],
@@ -469,7 +466,7 @@ function renderAuthFileRow(file, account) {
       "button",
       {
         type: "button",
-        class: "labeled-icon-button auth-quota-refresh" + (loading ? " loading" : ""),
+        class: "labeled-icon-button round-icon-button" + (loading ? " loading" : ""),
         disabled: !canRefreshAuthQuota(file) || loading || ui.bulk.dataset.loading === "true",
         "aria-label": m("ui.update_quotas"),
         "data-tip": authQuotaRefreshTitle(file) || m("ui.update_quotas"),
@@ -503,7 +500,27 @@ function renderAuthFileRow(file, account) {
       )
     ),
     renderAuthFileUsage(file),
-    el("td", { class: "auth-quota-cell" }, renderAuthFileQuota(file, account)),
+    el(
+      "td",
+      { class: "auth-quota-cell" },
+      el(
+        "div",
+        {
+          class: "auth-quota-open",
+          role: "button",
+          tabindex: "0",
+          "aria-haspopup": "dialog",
+          "aria-label": m("ui.view_quota_history"),
+          onclick: () => openAuthDrawer(file, account),
+          onkeydown: (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            openAuthDrawer(file, account);
+          }
+        },
+        renderAuthFileQuota(file, account)
+      )
+    ),
     el(
       "td",
       { class: "auth-actions-cell" },
@@ -528,13 +545,21 @@ function renderAuthFileRow(file, account) {
   );
 }
 
-function renderAuthFileUsage(file) {
-  const usage = file.usage || {};
+function authUsageSummary(usage) {
   const count = usage.requests || 0;
   const failed = usage.failed || 0;
-  const success = count ? (((count - failed) / count) * 100).toFixed(2) + "%" : "—";
-  const total = (usage.input_tokens || 0) + (usage.output_tokens || 0);
-  const cache = usage.input_tokens ? ((usage.cache_read_tokens / usage.input_tokens) * 100).toFixed(2) + "%" : "—";
+  return {
+    count,
+    failed,
+    success: count ? (((count - failed) / count) * 100).toFixed(2) + "%" : "—",
+    total: (usage.input_tokens || 0) + (usage.output_tokens || 0),
+    cache: usage.input_tokens ? ((usage.cache_read_tokens / usage.input_tokens) * 100).toFixed(2) + "%" : "—"
+  };
+}
+
+function renderAuthFileUsage(file) {
+  const usage = file.usage || {};
+  const { count, failed, success, total, cache } = authUsageSummary(usage);
   const metric = (name, label, value, tooltip, secondary) => {
     const detail =
       secondary &&
@@ -759,6 +784,213 @@ async function refreshFilteredAuthQuotas(account) {
     }
   }
 }
+
+// The drawer shows one auth file over the last 30 days: its usage, its manual resets and the periods of each quota window.
+const authDrawer = { account: false, file: null, history: null, error: "", window: 0, request: 0 };
+const AUTH_RESET_PROVIDERS = ["codex", "claude"];
+const QUOTA_PERIOD_ENDS = { scheduled: ["plain", "ui.quota_period_scheduled"], early_reset: ["warn", "ui.quota_period_early_reset"] };
+
+function openAuthDrawer(file, account) {
+  closeHoverTooltip();
+  Object.assign(authDrawer, { account, file, history: null, error: "", window: 0 });
+  renderAuthDrawerFile();
+  renderAuthDrawerHistory();
+  $("auth-drawer").showModal();
+  guard(loadAuthDrawerHistory);
+  // Manual resets come only from a quota query.
+  const ui = authUI(account);
+  if (
+    AUTH_RESET_PROVIDERS.includes(file.category) && canRefreshAuthQuota(file) && !ui.owner.authQuotas.has(file.auth_index) &&
+    ui.bulk.dataset.loading !== "true"
+  )
+    guard(() => refreshAuthQuota(file, account));
+}
+
+async function loadAuthDrawerHistory() {
+  const { account, file } = authDrawer;
+  const request = ++authDrawer.request;
+  try {
+    const path = "/auth-files/history?auth_index=" + encodeURIComponent(file.auth_index);
+    const history = requireObject(account ? await accountAPI(path) : await plugin("GET", path), m("ui.quota_windows"));
+    requireArray(history.windows, m("ui.quota_windows"));
+    if (request === authDrawer.request) Object.assign(authDrawer, { history, error: "" });
+  } catch (error) {
+    if (error instanceof AuthError || error instanceof StaleRequestError) throw error;
+    if (request === authDrawer.request) authDrawer.error = error.message || String(error);
+  } finally { if (request === authDrawer.request) renderAuthDrawerHistory(); }
+}
+
+function renderAuthDrawerFile() {
+  const ui = authUI(authDrawer.account);
+  const file = (ui.files.value || []).find((item) => item.auth_index === authDrawer.file.auth_index) || authDrawer.file;
+  const title = file.email || file.name;
+  authDrawer.file = file;
+  $("auth-drawer-identity").replaceChildren(
+    authProviderIcon(file.category),
+    el(
+      "div",
+      { class: "drawer-title" },
+      el("h2", {
+        id: "auth-drawer-title",
+        class: "mask-blur",
+        "data-tip": title,
+        "data-tip-overflow": "",
+        text: title || m("ui.no_email_provided")
+      }),
+      authFileMeta(file, authFileQuota(file, ui.owner))
+    )
+  );
+  renderAuthDrawerResets(file, authDrawer.account);
+}
+
+function renderAuthDrawerResets(file, account) {
+  $("auth-drawer-reset-section").classList.toggle("hidden", !AUTH_RESET_PROVIDERS.includes(file.category));
+  const owner = authUI(account).owner;
+  const result = owner.authQuotas.get(file.auth_index);
+  const error = owner.authQuotaErrors.get(file.auth_index);
+  const count = result?.rate_limit_reset_credits_available_count;
+  setText($("auth-drawer-reset-count"), Number.isFinite(count) ? int(count) : "");
+  const reset = $("auth-drawer-reset");
+  reset.classList.toggle("hidden", account && resources.account.profile.value?.can_reset_auth_quota !== true);
+  reset.disabled = !canResetAuthQuota(file, account);
+  reset.onclick = () => guard(() => resetAuthQuota(file, account));
+  const status = (text) => el("div", { class: "muted small", text });
+  const content = owner.authQuotaLoading.has(file.auth_index)
+    ? status(m("ui.updating_quotas"))
+    : error && !result
+      ? el("div", { class: "auth-quota-error", text: error })
+      : !result
+        ? status(authQuotaRefreshTitle(file) || m("ui.refresh_to_query_quota"))
+        : (renderAuthResetCredits(file, result) ?? (count === 0 ? status(m("ui.no_manual_resets_available")) : null));
+  $("auth-drawer-resets").replaceChildren(...(content ? [content] : []));
+}
+
+function renderAuthDrawerHistory() {
+  const { history, error } = authDrawer;
+  const switcher = $("auth-drawer-window-switch");
+  switcher.classList.toggle("hidden", !history?.windows.length);
+  if (!history) {
+    $("auth-drawer-usage").replaceChildren(
+      ...(error
+        ? [
+            el("div", { class: "auth-quota-error", text: error }),
+            el("button", { class: "retry-button", onclick: () => retryAuthDrawerHistory() }, m("ui.retry"))
+          ]
+        : [el("div", { class: "muted small", text: m("ui.loading") })])
+    );
+    switcher.replaceChildren();
+    $("auth-drawer-periods").replaceChildren();
+    return;
+  }
+  $("auth-drawer-usage").replaceChildren(renderAuthDrawerUsage(history.usage));
+  if (authDrawer.window >= history.windows.length) authDrawer.window = 0;
+  switcher.replaceChildren(
+    ...history.windows.map((window, index) =>
+      el(
+        "button",
+        {
+          type: "button",
+          role: "tab",
+          onclick: () => {
+            authDrawer.window = index;
+            renderAuthDrawerPeriods();
+          }
+        },
+        quotaLabel(window)
+      )
+    )
+  );
+  renderAuthDrawerPeriods();
+}
+
+function retryAuthDrawerHistory() {
+  authDrawer.error = "";
+  renderAuthDrawerHistory();
+  guard(loadAuthDrawerHistory);
+}
+
+function renderAuthDrawerUsage(usage) {
+  const { count, success, total, cache } = authUsageSummary(usage);
+  const stat = (label, value, tooltip) =>
+    el(
+      "div",
+      { class: "inset-card drawer-stat" },
+      el("span", { class: "drawer-stat-label", text: label }),
+      el("span", { class: "drawer-stat-value", "data-tip": tooltip }, value)
+    );
+  return el(
+    "div",
+    { class: "drawer-stats" },
+    stat(m("ui.requests"), tokens(count, 2), count >= 1000 ? int(count) : null),
+    stat(m("ui.success_rate"), success),
+    stat(m("ui.auth_total_tokens"), tokens(total), total >= 1000 ? exactTokens(total) : null),
+    stat(m("ui.cost"), usd(usage.cost_usd, 2)),
+    stat(m("ui.cache_rate"), cache)
+  );
+}
+
+function renderAuthDrawerPeriods() {
+  const { history, window: selected, account, file } = authDrawer;
+  for (const [index, button] of Array.from($("auth-drawer-window-switch").children).entries()) {
+    button.classList.toggle("active", index === selected);
+    button.setAttribute("aria-selected", String(index === selected));
+  }
+  const window = history.windows[selected];
+  $("auth-drawer-periods").replaceChildren(
+    window
+      ? el("div", { class: "quota-period-list" }, window.periods.map((period) => renderQuotaPeriod(period, file.category, !account)))
+      : el("div", { class: "muted small", text: m("ui.no_quota_windows_reported") })
+  );
+}
+
+// Estimates need the usage of every request, which API key views do not have.
+function renderQuotaPeriod(period, category, estimate) {
+  const remaining = Math.max(0, 100 - period.used_percent);
+  const end = period.end || period.reset_at;
+  const [tone, reason] = QUOTA_PERIOD_ENDS[period.end_reason] || ["ok", "ui.quota_period_running"];
+  const range = quotaPeriodRange(new Date(period.start), end && new Date(end));
+  const usage = (label, metrics) => el("span", { class: "quota-period-usage" }, el("span", { text: label }), metrics);
+  return el(
+    "div",
+    { class: "auth-quota-row" },
+    el(
+      "div",
+      { class: "auth-quota-head" },
+      el("span", { class: "auth-quota-label", text: range }),
+      el("span", { class: "tag " + tone, text: m(reason) }),
+      el("span", { class: "auth-quota-value", text: remaining.toFixed(0) + "%" })
+    ),
+    renderQuotaBar(remaining, range),
+    el(
+      "div",
+      { class: "auth-quota-foot" },
+      usage(m("ui.quota_used"), renderQuotaMetrics(period.usage)),
+      estimate && usage(m("ui.quota_projected"), renderQuotaMetrics(period.usage, quotaEstimateScale(period.used_percent, period.usage))),
+      period.plans?.length > 0 &&
+        el(
+          "span",
+          { class: "quota-period-plans" },
+          period.plans.flatMap((plan, index) => [
+            index > 0 && "→",
+            el("span", { class: "tag " + authPlanTone(category, plan), text: plan })
+          ])
+        )
+    )
+  );
+}
+
+function quotaPeriodRange(start, end) {
+  const from = compactResetDate(start);
+  if (!end) return from + " – …";
+  const to = compactResetDate(end);
+  return from + " – " + (to.slice(0, 5) === from.slice(0, 5) ? to.slice(6) : to);
+}
+
+$("auth-drawer-close").replaceChildren(actionIcon("x"));
+setLabeledActionIcon($("auth-drawer-reset"), "rotate-cw-clock", m("ui.reset_quota"));
+$("auth-drawer-close").onclick = () => $("auth-drawer").close();
+$("auth-drawer").addEventListener("click", (event) => { if (event.target === event.currentTarget) event.currentTarget.close(); });
+$("auth-drawer").addEventListener("close", () => authDrawer.request++);
 
 for (const account of [false, true]) {
   const ui = authUI(account);

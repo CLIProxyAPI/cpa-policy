@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cpa-key-billing/internal/billing"
+	"cpa-key-billing/internal/messages"
 )
 
 // quotaMeter says which requests on a credential count against a quota
@@ -76,7 +77,7 @@ func periodSeconds(start, resetAt string) int64 {
 }
 
 const (
-	// quotaHistoryRange is how far back an auth file's quota is read.
+	// quotaHistoryRange is how far back an auth file's quota periods are listed.
 	quotaHistoryRange = 30 * 24 * time.Hour
 	// quotaHistoryLookback first reads the reports of one more week, the
 	// longest window providers report on requests, so that a period running at
@@ -264,4 +265,77 @@ func (a *App) attachQuotaUsage(scope string, quotas map[quotaCredential]*authQuo
 		rows[i].Usage = &usage[i]
 	}
 	return nil
+}
+
+type authFileHistoryResponse struct {
+	From    time.Time                    `json:"from"`
+	To      time.Time                    `json:"to"`
+	Usage   billing.CredentialUsageStats `json:"usage"`
+	Windows []quotaWindowView            `json:"windows"`
+}
+
+// quotaWindowView lists a window's periods, newest first.
+type quotaWindowView struct {
+	Label        string            `json:"label"`
+	LabelMessage messages.Message  `json:"label_message,omitzero"`
+	LabelPrefix  string            `json:"label_prefix,omitempty"`
+	Periods      []quotaPeriodView `json:"periods"`
+}
+
+type quotaPeriodView struct {
+	Start       time.Time                `json:"start"`
+	End         time.Time                `json:"end,omitzero"`
+	ResetAt     time.Time                `json:"reset_at,omitzero"`
+	EndReason   billing.QuotaPeriodEnd   `json:"end_reason,omitempty"`
+	UsedPercent float64                  `json:"used_percent"`
+	Plans       []string                 `json:"plans,omitempty"`
+	Usage       billing.QuotaPeriodUsage `json:"usage"`
+}
+
+// readAuthFileHistory lists an auth file's usage over the last 30 days and the
+// periods of its metered quota windows that ran in them, each with its whole
+// usage, even from before. A scope limits usage to one API key.
+func (a *App) readAuthFileHistory(credential quotaCredential, scope string) (authFileHistoryResponse, error) {
+	now := a.store.Now()
+	response := authFileHistoryResponse{From: now.Add(-quotaHistoryRange), To: now, Windows: []quotaWindowView{}}
+	stats, err := a.store.CredentialUsageStats([]string{credential.authIndex}, scope, response.From, now)
+	if err != nil {
+		return response, err
+	}
+	response.Usage = stats[credential.authIndex]
+	histories, err := a.completeQuotaHistories(credential, response.From, now)
+	if err != nil {
+		return response, err
+	}
+	rows := make([]quotaRow, len(histories))
+	for i, history := range histories {
+		rows[i] = history.row
+	}
+	exclusive := exclusiveModels(rows)
+	var periods []billing.QuotaPeriod
+	for _, history := range histories {
+		window := quotaWindowView{Label: history.row.Label, LabelMessage: history.row.LabelMessage, LabelPrefix: history.row.LabelPrefix}
+		for i := len(history.periods) - 1; i >= 0; i-- {
+			period := history.periods[i]
+			if !period.EndsAfter(response.From) {
+				break
+			}
+			window.Periods = append(window.Periods, quotaPeriodView{Start: period.Start, End: period.End, ResetAt: period.ResetAt,
+				EndReason: period.EndReason, UsedPercent: period.UsedPercent, Plans: period.Plans})
+			periods = append(periods, history.row.usagePeriod(credential, period, now, exclusive))
+		}
+		if len(window.Periods) > 0 {
+			response.Windows = append(response.Windows, window)
+		}
+	}
+	usage, err := a.store.QuotaPeriodUsage(scope, periods)
+	if err != nil {
+		return response, err
+	}
+	for w := range response.Windows {
+		for p := range response.Windows[w].Periods {
+			response.Windows[w].Periods[p].Usage, usage = usage[0], usage[1:]
+		}
+	}
+	return response, nil
 }

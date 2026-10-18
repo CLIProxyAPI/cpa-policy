@@ -149,7 +149,7 @@ func TestFetchedQuotaKeysUnifiedWindowsAndCoversModelFamilies(t *testing.T) {
 	}
 }
 
-func TestQuotaUsageFollowsPlanChangesAndIgnoresOtherPools(t *testing.T) {
+func TestQuotaHistoryFollowsPlanChangesAndMatchesCurrentUsage(t *testing.T) {
 	app, _ := newAppWithPriceAndState(t, true)
 	now := app.store.Now()
 	base := now.Add(-241 * time.Hour).Truncate(time.Hour)
@@ -206,6 +206,48 @@ func TestQuotaUsageFollowsPlanChangesAndIgnoresOtherPools(t *testing.T) {
 	app.SetHostCaller(func(string, any) (json.RawMessage, error) {
 		return json.RawMessage(`{"files":[{"auth_index":"codex-1","name":"dummy.json","type":"codex"}]}`), nil
 	})
+	history := func(access viewAccess) authFileHistoryResponse {
+		t.Helper()
+		response := app.authFileHistory(ManagementRequest{Query: url.Values{"auth_index": {"codex-1"}}}, access)
+		var result authFileHistoryResponse
+		if response.StatusCode != http.StatusOK || json.Unmarshal(response.Body, &result) != nil {
+			t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+		}
+		return result
+	}
+	type period struct {
+		start, end int // end -1 while the period runs
+		reason     billing.QuotaPeriodEnd
+		tokens     int64
+		plans      string
+	}
+	// Periods end on schedule or at a counter reset; a response that leaves a window out says nothing about it.
+	want := map[string][]period{
+		"5-hour limit": {{237, -1, "", 6620, "Plus"}, {192, 197, billing.QuotaPeriodScheduled, 3200, "Plus"},
+			{95, 100, billing.QuotaPeriodScheduled, 2400, "Plus"}, {48, 53, billing.QuotaPeriodScheduled, 400, "Plus"},
+			{0, 5, billing.QuotaPeriodScheduled, 300, "Plus"}},
+		"Weekly limit": {{96, -1, "", 10620, "Pro 100,Plus"}, {-1, 96, billing.QuotaPeriodEarlyReset, 2300, "Plus"}},
+	}
+	result := history(viewAccess{})
+	if result.Usage.Requests != 11 || result.Usage.InputTokens != 21920 || len(result.Windows) != 2 ||
+		result.Windows[0].Label != "5-hour limit" || result.Windows[1].Label != "Weekly limit" {
+		t.Fatalf("history: %+v", result)
+	}
+	for _, window := range result.Windows {
+		if len(window.Periods) != len(want[window.Label]) {
+			t.Fatalf("%s periods: %+v", window.Label, window.Periods)
+		}
+		for i, expected := range want[window.Label] {
+			got, end := window.Periods[i], time.Time{}
+			if expected.end >= 0 {
+				end = hour(expected.end)
+			}
+			if !got.Start.Equal(hour(expected.start)) || !got.End.Equal(end) || got.EndReason != expected.reason ||
+				got.Usage.Tokens != expected.tokens || strings.Join(got.Plans, ",") != expected.plans {
+				t.Fatalf("%s period %d: %+v, want %+v", window.Label, i, got, expected)
+			}
+		}
+	}
 	files, err := app.listAuthFiles(viewAccess{}, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +260,60 @@ func TestQuotaUsageFollowsPlanChangesAndIgnoresOtherPools(t *testing.T) {
 	usage := quotaUsageByLabel(t, files[0].Quota)
 	if strings.Join(labels, ",") != "5-hour limit,Weekly limit" || !files[0].Quota.Quota[0].ObservedAt.Equal(hour(239)) ||
 		usage["5-hour limit"].Tokens != 6620 || usage["Weekly limit"].Tokens != 10620 {
-		t.Fatalf("current windows: %+v", files[0].Quota.Quota)
+		t.Fatalf("current windows differ from the history: %+v", files[0].Quota.Quota)
+	}
+	scoped := history(viewAccess{APIKey: true, Tracked: true, Scope: billing.CallerScope("sk-dummy-one")})
+	if scoped.Usage.Requests != 5 || scoped.Windows[1].Periods[0].Usage.Tokens != 800 {
+		t.Fatalf("scoped history: %+v", scoped)
+	}
+}
+
+func TestQuotaHistoryListsPeriodsThatBeganBeforeTheRangeWhole(t *testing.T) {
+	app, _ := newAppWithPriceAndState(t, true)
+	now := app.store.Now().Truncate(time.Second)
+	hour := func(value int) time.Time { return now.Add(time.Duration(value) * time.Hour) }
+	unix := func(value int) string { return strconv.FormatInt(hour(value).Unix(), 10) }
+	spark := func(used string) http.Header {
+		return http.Header{"X-Codex-Bengalfox-Limit-Name": {"GPT-5.3-Codex-Spark"}, "X-Codex-Bengalfox-Primary-Used-Percent": {used},
+			"X-Codex-Bengalfox-Primary-Window-Minutes": {"43200"}, "X-Codex-Bengalfox-Primary-Reset-At": {unix(-240)}}
+	}
+	for _, event := range []struct {
+		at      int
+		model   string
+		headers http.Header
+		tokens  int64
+	}{
+		// A weekly period opened 33 days ago and ended 26 days ago.
+		{-790, "gpt-5.5", http.Header{"X-Codex-Secondary-Used-Percent": {"10"}, "X-Codex-Secondary-Window-Minutes": {"10080"},
+			"X-Codex-Secondary-Reset-At": {unix(-624)}}, 100},
+		{-700, "gpt-5.5", nil, 200},
+		// A monthly period opened 40 days ago and was reset 38 days ago.
+		{-936, "gpt-5.3-codex-spark", spark("80"), 1000},
+		{-912, "gpt-5.3-codex-spark", spark("0"), 2000},
+		{-480, "gpt-5.3-codex-spark", spark("30"), 4000},
+	} {
+		publishUsageRecord(t, app, UsageRecord{Provider: "codex", AuthType: "oauth", AuthIndex: "codex-1", APIKey: "sk-dummy",
+			Model: event.model, RequestedAt: hour(event.at), ResponseHeaders: event.headers,
+			Detail: UsageDetail{InputTokens: event.tokens, TotalTokens: event.tokens}})
+	}
+	history, err := app.readAuthFileHistory(quotaCredential{"codex-1", "codex"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type period struct {
+		label      string
+		start, end int
+		tokens     int64
+	}
+	want := []period{{"Weekly limit", -792, -624, 300}, {"GPT-5.3-Codex-Spark Monthly limit", -912, -240, 6000}}
+	if len(history.Windows) != len(want) {
+		t.Fatalf("windows: %+v", history.Windows)
+	}
+	for i, expected := range want {
+		window := history.Windows[i]
+		if window.Label != expected.label || len(window.Periods) != 1 || !window.Periods[0].Start.Equal(hour(expected.start)) ||
+			!window.Periods[0].End.Equal(hour(expected.end)) || window.Periods[0].Usage.Tokens != expected.tokens {
+			t.Fatalf("%s: %+v, want %+v", window.Label, window.Periods, expected)
+		}
 	}
 }

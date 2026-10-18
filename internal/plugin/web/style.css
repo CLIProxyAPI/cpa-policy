@@ -574,7 +574,8 @@ tbody tr:hover { background: var(--bg-hover); }
 /* CPAMP's top bar already shows the page title. */
 :root[data-cpamp-plugin-host="true"]:not([data-cpamp-standalone]) #app > .app-header { display: none; }
 /* CPAMC frames plugin pages edge to edge under its floating header, without the band that fades its other pages there. */
-:root:not([data-cpamp-plugin-host="true"]) .wrap { padding: 70px clamp(20px, 3vw, 48px) 0; }
+:root:not([data-cpamp-plugin-host="true"]) { --host-header-inset: 70px; }
+:root:not([data-cpamp-plugin-host="true"]) .wrap { padding: var(--host-header-inset) clamp(20px, 3vw, 48px) 0; }
 :root:not([data-cpamp-plugin-host="true"]) .app-header { min-height: 0; margin-bottom: 24px; }
 :root:not([data-cpamp-plugin-host="true"]) body::before {
   content: "";
@@ -627,7 +628,7 @@ tbody tr:hover { background: var(--bg-hover); }
   border-color: var(--border-subtle, var(--app-border));
   background: var(--surface-subtle, var(--app-surface-muted));
 }
-:root[data-cpamp-plugin-host="true"] .access-switch, :root[data-cpamp-plugin-host="true"] .toggle-filter {
+:root[data-cpamp-plugin-host="true"] .toggle-filter {
   border-color: var(--app-input-border, var(--app-border));
   background: var(--app-input-bg, var(--app-surface-strong));
 }
@@ -755,17 +756,19 @@ button.key-copy-button.copied, button.key-copy-button.copied:hover { color: var(
 .gate { max-width: 520px; margin: 9vh auto; padding: 20px; }
 .gate-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .gate h1 { margin: 0; font-size: 18px; line-height: 1.5; }
-.access-switch {
+.segmented-control {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-auto-columns: minmax(max-content, 1fr);
+  grid-auto-flow: column;
   gap: 4px;
   padding: 4px;
-  margin: 18px 0;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
+  overflow-x: auto;
 }
-.access-switch button {
+.gate .segmented-control { margin: 18px 0; }
+.segmented-control button {
   min-height: 38px;
   border-color: transparent;
   border-radius: calc(var(--radius-md) - 2px);
@@ -774,30 +777,30 @@ button.key-copy-button.copied, button.key-copy-button.copied:hover { color: var(
   font-size: 14px;
   font-weight: 600;
 }
-.access-switch button.active {
+.segmented-control button.active {
   border-color: var(--border-primary);
   background: var(--bg-tertiary);
   color: var(--text-primary);
   box-shadow: var(--shadow);
 }
-:root[data-cpamp-plugin-host="true"] .access-switch {
+:root[data-cpamp-plugin-host="true"] .segmented-control {
   border-color: color-mix(in srgb, var(--border-color) 82%, transparent);
   border-radius: 14px;
   background: color-mix(in srgb, var(--surface-subtle, var(--bg-tertiary)) 78%, var(--bg-primary));
 }
-:root[data-cpamp-plugin-host="true"] .access-switch button {
+:root[data-cpamp-plugin-host="true"] .segmented-control button {
   border: 0;
   border-radius: 10px;
   background: transparent;
   color: var(--text-secondary);
   box-shadow: none;
 }
-:root[data-cpamp-plugin-host="true"] .access-switch button:hover:not(:disabled) {
+:root[data-cpamp-plugin-host="true"] .segmented-control button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--primary-color) 6%, var(--bg-primary));
   color: var(--primary-active);
 }
-:root[data-cpamp-plugin-host="true"] .access-switch button.active,
-:root[data-cpamp-plugin-host="true"] .access-switch button.active:hover:not(:disabled) {
+:root[data-cpamp-plugin-host="true"] .segmented-control button.active,
+:root[data-cpamp-plugin-host="true"] .segmented-control button.active:hover:not(:disabled) {
   background: var(--app-accent-soft, var(--bg-hover));
   color: var(--primary-color);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary-color) 30%, transparent);
@@ -1183,7 +1186,7 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
   margin-left: auto;
 }
 .auth-quota-actions { display: flex; flex-direction: column; gap: 6px; }
-.auth-quota-refresh, .auth-quota-reset {
+.round-icon-button {
   --button-padding-inline: 0;
   --button-radius: 50%;
   width: var(--button-min-height);
@@ -1206,9 +1209,24 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
     animation: none;
   }
 }
+/* A clickable area rather than a button, so it keeps the cell's look in hosts that theme every button role. */
+.auth-quota-open {
+  min-height: 0;
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.auth-quota-open:hover { background: color-mix(in srgb, var(--primary-color) 7%, transparent); }
+.auth-quota-open:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
 .auth-file-quota { display: grid; gap: 10px; min-width: 0; container: auth-quota / inline-size; }
 .auth-quota-summary { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text-secondary); font-size: 12px; }
-.auth-reset-count[tabindex] { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .auth-reset-credits { display: grid; gap: 8px; font-size: 12px; }
 .auth-reset-credits-title { color: var(--text-secondary); font-weight: 600; }
 .auth-reset-credit {
@@ -1226,6 +1244,7 @@ body.privacy-masked .mask-select:not(:has(option[value=""]:checked))::before {
 .auth-reset-credit-time { margin-left: auto; color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .auth-reset-confirmation { display: grid; gap: 8px; font-size: 14px; white-space: normal; }
 .auth-reset-available { display: flex; align-items: center; gap: 6px; }
+.auth-reset-count-badge:empty { display: none; }
 .auth-reset-count-badge {
   display: inline-grid;
   place-items: center;
@@ -1393,6 +1412,63 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
 .route-form-toolbar > .row { align-self: end; padding-bottom: 6px; }
 .dialog-input { width: 100%; }
 .dialog-actions { justify-content: flex-end; margin-top: 14px; }
+dialog.drawer {
+  inset: var(--host-header-inset, 0) 0 0 auto;
+  width: min(600px, 100vw);
+  max-width: none;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border-width: 0 0 0 1px;
+  border-radius: 14px 0 0 14px;
+  overflow: hidden;
+}
+dialog.drawer[open] { display: flex; flex-direction: column; }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.drawer[open] { animation: drawer-in 0.28s cubic-bezier(0.23, 1, 0.32, 1); }
+}
+@keyframes drawer-in {
+  from { translate: 100% 0; }
+}
+.drawer-header {
+  --button-min-height: 32px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+.drawer-identity { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; }
+.drawer-title { min-width: 0; }
+.drawer-title h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-body {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 24px;
+  padding: 18px 20px max(24px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.drawer-section { display: grid; gap: 10px; min-width: 0; }
+.drawer-section > :empty { display: none; }
+.drawer-section h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+.drawer-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.drawer-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.drawer-stat { display: grid; align-content: start; gap: 3px; padding: 10px 12px; }
+.drawer-stat-label { overflow: hidden; color: var(--text-tertiary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-stat-value {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.quota-period-list > .auth-quota-row { padding-block: 12px; border-top: 1px solid var(--border-color); }
+.quota-period-list > .auth-quota-row:first-child { padding-top: 0; border-top: 0; }
+.quota-period-usage { display: inline-flex; align-items: center; gap: 6px; }
+.quota-period-plans { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
 .retry-button { margin-top: 10px; }
 .display-contents { display: contents; }
 .switch-field { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 13px; margin-top: 16px; }
@@ -2159,6 +2235,8 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   .analysis-legend-item { padding: 4px 8px; font-size: 10px; }
   .analysis-trend-chart { height: 280px; }
   dialog { width: calc(100vw - 24px); max-width: none; padding: 16px; }
+  dialog.drawer { border-width: 0; border-radius: 0; }
+  .drawer-header, .drawer-body { padding-inline: 16px; }
   .settings-dialog { padding: 18px; }
   .route-dialog .route-form-toolbar { grid-template-columns: 1fr; }
   .settings-entry-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
