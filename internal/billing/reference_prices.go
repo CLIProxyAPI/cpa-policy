@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -132,18 +133,25 @@ func (s *Store) ReferencePriceMetadata() ReferencePriceMetadata {
 	return metadata
 }
 
-// The upstream model takes precedence. Fall back to the requested model only
-// when the upstream model has no entries, never when its prices conflict.
+// Keys run upstream, requested, then their -high/-low effort-tier bases, which
+// share per-token rates. Use a later key only when earlier keys have no entries.
 func referencePriceKeys(upstream, requested string) []string {
-	keys := make([]string, 0, 2)
+	keys := make([]string, 0, 4)
 	for index, model := range []string{upstream, requested} {
 		base := ModelWithoutThinkingSuffix(model)
 		if index == 1 && strings.EqualFold(base, "auto") {
 			continue
 		}
 		key := ReferenceModelKey(base)
-		if key != "" && (len(keys) == 0 || keys[0] != key) {
+		if key != "" && !slices.Contains(keys, key) {
 			keys = append(keys, key)
+		}
+	}
+	for _, key := range slices.Clone(keys) {
+		for _, suffix := range []string{"-high", "-low"} {
+			if base, found := strings.CutSuffix(key, suffix); found && base != "" && !slices.Contains(keys, base) {
+				keys = append(keys, base)
+			}
 		}
 	}
 	return keys
@@ -409,10 +417,11 @@ func (references *referencePriceManager) lookupModels(ctx context.Context, model
 		keys := make([]string, 0, len(batch))
 		seen := make(map[string]bool)
 		for _, model := range batch {
-			key := ReferenceModelKey(ModelWithoutThinkingSuffix(model))
-			if key != "" && !seen[key] {
-				seen[key] = true
-				keys = append(keys, key)
+			for _, key := range referencePriceKeys(model, model) {
+				if !seen[key] {
+					seen[key] = true
+					keys = append(keys, key)
+				}
 			}
 		}
 		prices, err := references.repository.ReferencePriceCandidates(ctx, keys)
@@ -425,8 +434,12 @@ func (references *referencePriceManager) lookupModels(ctx context.Context, model
 			candidatesByKey[key] = append(candidatesByKey[key], price)
 		}
 		for _, model := range batch {
-			key := ReferenceModelKey(ModelWithoutThinkingSuffix(model))
-			if price, found := matchReferencePriceKey(key, candidatesByKey[key]); found {
+			modelKeys := referencePriceKeys(model, model)
+			var candidates []ReferencePrice
+			for _, key := range modelKeys {
+				candidates = append(candidates, candidatesByKey[key]...)
+			}
+			if price, found := matchReferencePriceKeys(candidates, modelKeys); found {
 				matched[model] = price
 			}
 		}
@@ -448,7 +461,7 @@ func ReferenceModelKey(modelID string) string {
 // all matching providers must agree on supported rates. An absent rate or a
 // conflict leaves the model unpriced.
 func MatchReferencePrice(modelID string, candidates []ReferencePrice) (ReferencePrice, bool) {
-	return matchReferencePriceKey(ReferenceModelKey(ModelWithoutThinkingSuffix(modelID)), candidates)
+	return matchReferencePriceKeys(candidates, referencePriceKeys(modelID, modelID))
 }
 
 func matchReferencePriceKey(key string, candidates []ReferencePrice) (ReferencePrice, bool) {
