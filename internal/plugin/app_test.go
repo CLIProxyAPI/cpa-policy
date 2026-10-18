@@ -111,6 +111,7 @@ func TestManagementRegistrationExposesOnlyCurrentEndpoints(t *testing.T) {
 		"GET /analysis", "GET /analysis/speed", "GET /events", "GET /events/keys", "GET /errors",
 		"GET /plugin-logs", "DELETE /plugin-logs", "GET /auth-files", "GET /auth-files/quota",
 		"POST /auth-files/quota/reset", "GET /auth-files/history", "GET /auth-files/history/models",
+		"GET /ai-providers/usage",
 	} {
 		wantRoutes[value] = false
 	}

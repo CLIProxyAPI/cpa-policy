@@ -239,6 +239,8 @@ function restoreRolePreferences(role) {
     if ($("analysis-key").value === UNASSIGNED_KEY) $("analysis-key").selectedOptions[0].textContent = m("ui.unassigned");
     restoreChoice(role, "keys-include-deleted", false);
     restoreChoice(role, "auth-quota-estimate", false);
+    restoreChoice(role, "ai-provider-enabled-only", true);
+    restoreChoice(role, "ai-provider-type", "");
     restoreChoice(role, "plugin-log-level", "all");
   }
   sharedTimeRanges[role] = storedTimeRange(role);
@@ -265,6 +267,7 @@ function resetRoleControls(role) {
   $(prefix + "auth-search").value = "";
   if (!account) {
     $("key-filter").value = "";
+    $("ai-provider-search").value = "";
     $("keys-include-deleted").checked = false;
     $("price-filter").value = "";
     $("plugin-log-filter").value = "";
@@ -292,7 +295,10 @@ function resetRoleData(role) {
   analysisQueries[role].clear();
   speedQueries[role].clear();
   authFilesQueries[role].clear();
-  if (!account) eventKeysQuery.clear();
+  if (!account) {
+    aiProvidersQuery.clear();
+    eventKeysQuery.clear();
+  }
   for (const list of Object.values(pagedLists[role])) list.reset();
   resetRoleControls(role);
 }
@@ -404,8 +410,8 @@ function setAdminTab(name) {
   }
   $("page-tab-select").value = selected;
   const visible = selected === "settings" ? new Set(["plans", "routes", "prices", "plugin-logs"]) : new Set([selected]);
-  for (const section of ["keys", "analysis", "plans", "routes", "prices", "request-events", "errors", "auth-files", "plugin-logs"]) {
-    $("tab-" + section).classList.toggle("hidden", !visible.has(section));
+  for (const section of document.querySelectorAll('#app > section[id^="tab-"]')) {
+    section.classList.toggle("hidden", !visible.has(section.id.slice("tab-".length)));
   }
   updatePageControls(false, pages.admin[selected]);
 }

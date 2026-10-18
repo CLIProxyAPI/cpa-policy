@@ -28,7 +28,7 @@ function readPanelKey() {
 
 const embedded = window.parent !== window;
 document.body.classList.toggle("embedded", embedded);
-const ADMIN_TAB_IDS = ["keys", "analysis", "request-events", "errors", "auth-files", "settings"];
+const ADMIN_TAB_IDS = ["keys", "analysis", "request-events", "errors", "auth-files", "ai-providers", "settings"];
 const ACCOUNT_TAB_IDS = ["subscription", "analysis", "request-events", "errors", "auth-files"];
 const PAGE_ROUTE_KEY = "cpa-key-billing.route.v1." + (embedded ? "embedded" : "standalone");
 
@@ -66,7 +66,16 @@ let loginModeRequest = 0;
 function emptyAuthQuotaState() {
   return { authQuotas: new Map(), authQuotaLoading: new Set(), authQuotaErrors: new Map(), authFileRevisions: new Map() };
 }
-function emptyAdminUIState() { return { ...emptyAuthQuotaState(), keySubmissions: new Set(), authStatusSubmissions: new Map() }; }
+function emptyAdminUIState() {
+  return {
+    ...emptyAuthQuotaState(),
+    keySubmissions: new Set(),
+    authStatusSubmissions: new Map(),
+    aiBalances: new Map(),
+    aiBalanceLoading: new Set(),
+    aiBalanceErrors: new Map()
+  };
+}
 let adminUIState = emptyAdminUIState();
 let accountUIState = emptyAuthQuotaState();
 const authQuotaGeneration = { admin: 0, account: 0 };
@@ -180,12 +189,14 @@ async function api(method, path, body, opts) {
         message || (currentRole === "account" ? m("ui.invalid_api_key_or_access_denied") : m("ui.invalid_management_key_or_access_denied"))
       );
     }
-    throw new UIError(
+    const error = new UIError(
       message ||
         (resp.status >= 500
           ? m("ui.service_unavailable_http_value", { v0: resp.status })
           : m("ui.server_error_http_value", { v0: resp.status }))
     );
+    error.status = resp.status;
+    throw error;
   }
   return payload;
 }

@@ -428,6 +428,79 @@ AUTH_FILES = [
     },
 ]
 
+# CPA's per-type lists of configured upstream API keys, with the auth index CPA reports for each
+# loaded credential. Keys are synthetic; a disabled compatible provider is not loaded, so it has none.
+AI_PROVIDER_LISTS = {
+    "claude-api-key": [
+        {"api-key": "sk-ant-dummy-claude-0000000001", "auth-index": "ai-demo-claude"},
+        {"api-key": "sk-dummy-deepseek-anthropic-0001", "base-url": "https://api.deepseek.com/anthropic",
+         "priority": 5, "weight": 3, "auth-index": "ai-demo-claude-deepseek"},
+    ],
+    "codex-api-key": [
+        {"api-key": "sk-proxy-dummy-codex-relay-7f3a", "base-url": "https://relay.example.com/v1", "prefix": "codex",
+         "priority": 10, "weight": 10, "auth-index": "ai-demo-codex-relay"},
+    ],
+    "gemini-api-key": [
+        {"api-key": "AIzaDummyGeminiKey0000000000001", "excluded-models": ["*"], "auth-index": "ai-demo-gemini"},
+    ],
+    "interactions-api-key": [],
+    "vertex-api-key": [
+        {"api-key": "vertex-dummy-key-0000000000001", "base-url": "https://aiplatform.googleapis.com", "auth-index": "ai-demo-vertex"},
+    ],
+    "xai-api-key": [
+        {"api-key": "xai-dummy-key-00000000000000001", "base-url": "https://api.x.ai/v1", "auth-index": "ai-demo-xai"},
+    ],
+    "meta-api-key": [
+        {"api-key": "meta-dummy-key-0000000000000001", "base-url": "https://api.llama.com/compat/v1", "auth-index": "ai-demo-meta"},
+    ],
+    "openai-compatibility": [
+        {"name": "openrouter", "base-url": "https://openrouter.ai/api/v1", "priority": 3,
+         "api-key-entries": [{"api-key": "sk-or-v1-dummy-000000000000000001", "weight": 2, "auth-index": "ai-demo-openrouter"}]},
+        {"name": "deepseek", "base-url": "https://api.deepseek.com/v1", "api-key-entries": [
+            {"api-key": "sk-dummy-deepseek-00000000000001", "auth-index": "ai-demo-deepseek-1"},
+            {"api-key": "sk-dummy-deepseek-00000000000002", "weight": 0, "auth-index": "ai-demo-deepseek-2"},
+        ]},
+        {"name": "kimi", "base-url": "https://api.moonshot.cn/v1",
+         "api-key-entries": [{"api-key": "sk-dummy-kimi-00000000000000001", "auth-index": "ai-demo-kimi"}]},
+        {"name": "siliconflow", "base-url": "https://api.siliconflow.cn/v1",
+         "api-key-entries": [{"api-key": "sk-dummy-siliconflow-expired-01", "auth-index": "ai-demo-siliconflow"}]},
+        {"name": "stepfun", "base-url": "https://api.stepfun.ai/v1",
+         "api-key-entries": [{"api-key": "dummy-stepfun-key-000000000001", "auth-index": "ai-demo-stepfun"}]},
+        {"name": "local", "base-url": "http://127.0.0.1:11434/v1", "auth-index": "ai-demo-local"},
+        {"name": "legacy", "base-url": "https://legacy.example.com/v1", "disabled": True,
+         "api-key-entries": [{"api-key": "sk-dummy-legacy-000000000000001"}]},
+    ],
+}
+
+# Balance responses of the upstreams the page queries, keyed by the request URL.
+AI_BALANCE_RESPONSES = {
+    "https://api.deepseek.com/user/balance": (200, {"is_available": True, "balance_infos": [
+        {"currency": "CNY", "total_balance": "37.07", "granted_balance": "2.29", "topped_up_balance": "34.78"}]}),
+    "https://openrouter.ai/api/v1/credits": (200, {"data": {"total_credits": 50, "total_usage": 38.4127}}),
+    "https://openrouter.ai/api/v1/key": (200, {"data": {"label": "sk-or-v1-dum...001", "limit": 20, "limit_remaining": 6.25, "usage": 13.75}}),
+    "https://api.moonshot.cn/v1/users/me/balance": (200, {"code": 0, "data": {
+        "available_balance": 49.58894, "voucher_balance": 46.58893, "cash_balance": 3.00001}, "scode": "0x0", "status": True}),
+    "https://api.siliconflow.cn/v1/user/info": (401, {"code": 30014, "data": None, "message": "Token is invalid."}),
+    "https://api.stepfun.ai/v1/accounts": (200, {"object": "account", "type": "prepaid", "balance": 0, "total_cash_balance": 10, "total_voucher_balance": 5}),
+}
+
+
+def ai_provider_credentials():
+    for field, entries in AI_PROVIDER_LISTS.items():
+        for entry in entries:
+            for credential in entry.get("api-key-entries") or [entry]:
+                if credential.get("auth-index"):
+                    yield credential
+
+
+def without_auth_indexes(value):
+    if isinstance(value, list):
+        return [without_auth_indexes(item) for item in value]
+    if isinstance(value, dict):
+        return {key: without_auth_indexes(item) for key, item in value.items() if key != "auth-index"}
+    return value
+
+
 AUTH_FILE_CREDENTIAL_REFS = {
     "auth-demo-codex-plus": "sha256:" + "a" * 64,
     "auth-demo-claude": "sha256:" + "b" * 64,
@@ -979,11 +1052,11 @@ SUCCESS_EVENT_SAMPLES = [
     event_sample(1, "codex · dev-team@example.com", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "medium", "auto", 2417, 1103, 0, (1194, 95616, 0, 73), (5, 0.5, 5, 30), auth_index="auth-demo-codex-plus"),
     event_sample(1, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexWebsocketsExecutor", "high", "auto", 5306, 2121, 21, (798, 169984, 0, 201), (4, 0.4, 5, 20), auth_index="auth-demo-codex-plus"),
     event_sample(2, "claude · platform@example.com", "claude", "deepseek-v4-pro", "ClaudeExecutor", "high", "auto", 10061, 637, 0, (38049, 0, 0, 474), (0.435, 0.003625, 0.435, 0.87), billing_model="claude/deepseek-v4-pro", response_model="deepseek-v4-pro", auth_index="auth-demo-claude"),
-    event_sample(7, "codex · sk-proxy…7f3a", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "high", "auto", 7288, 4130, 188, (8502, 45440, 0, 309), (5, 0.5, 5, 30)),
+    event_sample(7, "codex · sk-proxy…7f3a", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "high", "auto", 7288, 4130, 188, (8502, 45440, 0, 309), (5, 0.5, 5, 30), auth_index="ai-demo-codex-relay"),
     event_sample(6, "codex · dev-team@example.com", "codex", "gpt-5.6-terra", "CodexWebsocketsExecutor", "medium", "auto", 10120, 3379, 81, (1300, 69376, 0, 477), (2, 0.2, 2.5, 12), auth_index="auth-demo-codex-plus"),
     event_sample(4, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexWebsocketsExecutor", "high", "auto", 2609, 1881, 6, (1368, 237824, 0, 46), (4, 0.4, 5, 20), auth_index="auth-demo-codex-plus"),
     event_sample(5, "codex · dev-team@example.com", "codex", "gpt-5.6-luna", "CodexWebsocketsExecutor", "low", "auto", 5002, 2464, 61, (1261, 149248, 0, 147), (0.2, 0.02, 0.25, 1.2), auth_index="auth-demo-codex-plus"),
-    event_sample(7, "codex · sk-proxy…7f3a", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "high", "auto", 7634, 4412, 94, (24196, 19840, 0, 275), (5, 0.5, 5, 30)),
+    event_sample(7, "codex · sk-proxy…7f3a", "codex", "gpt-5.5", "CodexWebsocketsExecutor", "high", "auto", 7634, 4412, 94, (24196, 19840, 0, 275), (5, 0.5, 5, 30), auth_index="ai-demo-codex-relay"),
     event_sample(6, "codex · dev-team@example.com", "codex", "gpt-image-2", "CodexExecutor", "", "auto", 43679, 43476, 0, (1658, 0, 0, 915), (5, 1.25, 5, 30), auth_index="auth-demo-codex-plus"),
     event_sample(3, "claude · platform@example.com", "claude", "deepseek-v4-pro", "ClaudeExecutor", "high", "auto", 16431, 909, 0, (66079, 32768, 0, 535), (0.435, 0.003625, 0.435, 0.87), billing_model="claude/deepseek-v4-pro", auth_index="auth-demo-claude"),
     event_sample(0, "codex · dev-team@example.com", "codex", "gpt-5.6-sol", "CodexExecutor", "high", "auto", 19542, 17836, 681, (835, 282752, 0, 802), (8, 0.8, 10, 30), long_context=True, auth_index="auth-demo-codex-plus"),
@@ -1644,6 +1717,17 @@ def payload_for(path, query):
         return auth_file_history(query)
     if path == f"{API_BASE}/auth-files/history/models":
         return auth_file_period_models(query)
+    if path == f"{API_BASE}/ai-providers/usage":
+        entries = filter_event_time(REQUEST_EVENTS, query)
+        usage = {}
+        for index in set(query.get("auth_index", [])):
+            rows = [entry for entry in entries if entry["auth_index"] == index]
+            if rows:
+                usage[index] = credential_usage(rows)
+        return {"usage": usage}
+    if path.startswith("/v0/management/") and path.removeprefix("/v0/management/") in AI_PROVIDER_LISTS:
+        field = path.removeprefix("/v0/management/")
+        return {field: AI_PROVIDER_LISTS[field]}
     if path == f"{API_BASE}/prices/reference":
         term = query.get("q", [""])[0].lower()
         return {"prices": [
@@ -1653,19 +1737,7 @@ def payload_for(path, query):
     if path in {"/v0/management/config", "/v0/management/api-keys"}:
         config = {"api-keys": [f"sk-demo-{index:04d}" for index in range(1, len(LIVE_KEYS) + 1)]}
         if path == "/v0/management/config":
-            config.update({
-                "gemini-api-key": [],
-                "interactions-api-key": [],
-                "xai-api-key": [],
-                "vertex-api-key": [],
-                "codex-api-key": [{"api-key": "sk-dummy-codex", "prefix": "codex"}],
-                "claude-api-key": [{"api-key": "sk-dummy-claude", "prefix": "claude"}],
-                "openai-compatibility": [{
-                    "name": "DeepSeek",
-                    "disabled": False,
-                    "api-key-entries": [{"api-key": "sk-dummy-deepseek"}],
-                }],
-            })
+            config.update(without_auth_indexes(AI_PROVIDER_LISTS))
         return config
     if path == "/v1/models":
         return {"data": [{"id": row["model_id"]} for row in PRICES if row.get("in_models")] + [
@@ -1887,6 +1959,17 @@ class Handler(BaseHTTPRequestHandler):
         route = self.command, parsed.path
         if route == ("POST", f"{API_BASE}/auth-files/quota/reset"):
             self.reset_auth_quota(parsed, AUTH_FILES)
+        elif route == ("POST", "/v0/management/api-call"):
+            body = json.loads(request_body or b"{}")
+            credential = next((item for item in ai_provider_credentials() if item["auth-index"] == body.get("auth_index")), None)
+            if credential is None:
+                self.send_json(400, {"error": "auth credential not found for auth_index"})
+                return
+            if body.get("header", {}).get("Authorization") != "Bearer $TOKEN$":
+                self.send_json(400, {"error": "dummy backend: balance queries must use the credential token"})
+                return
+            status, upstream = AI_BALANCE_RESPONSES.get(body.get("url"), (404, {"error": {"message": "Not Found"}}))
+            self.send_json(200, {"status_code": status, "header": {"Content-Type": ["application/json"]}, "body": json.dumps(upstream)})
         elif route == ("PATCH", "/v0/management/auth-files/status"):
             body = json.loads(request_body or b"{}")
             item = next((item for item in AUTH_FILES if item["name"] == body.get("name")), None)

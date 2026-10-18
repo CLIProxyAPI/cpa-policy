@@ -60,6 +60,7 @@
                 <button type="button" data-tab="request-events" data-i18n="ui.request_events">Request events</button>
                 <button type="button" data-tab="errors" data-i18n="ui.error_events">Error events</button>
                 <button type="button" data-tab="auth-files" data-i18n="ui.auth_files">Auth Files</button>
+                <button type="button" data-tab="ai-providers" data-i18n="ui.ai_providers">AI Providers</button>
                 <button type="button" data-tab="settings" data-i18n="ui.settings">Settings</button>
               </div>
               <span class="native-select page-tab-select">
@@ -252,8 +253,8 @@
           <div class="card">
             <div class="row spread section-toolbar">
               <h2 data-i18n="ui.auth_files">Auth Files</h2>
-              <div class="row section-actions auth-filter-bar">
-                <div class="auth-filter-switches">
+              <div class="row section-actions credential-filter-bar">
+                <div class="credential-filter-switches">
                   <label class="toggle-filter">
                     <input id="auth-enabled-only" type="checkbox" role="switch" checked />
                     <span data-i18n="ui.enabled_only">Enabled only</span>
@@ -277,7 +278,31 @@
                 <button id="auth-refresh-filtered" class="labeled-icon-button" type="button" data-i18n="ui.update_quotas">Refresh quota</button>
               </div>
             </div>
-            <div id="auth-files-body" class="auth-file-list"></div>
+            <div id="auth-files-body" class="credential-list"></div>
+          </div>
+        </section>
+
+        <section id="tab-ai-providers" class="hidden">
+          <div class="card">
+            <div class="row spread section-toolbar">
+              <h2 data-i18n="ui.ai_providers">AI Providers</h2>
+              <div class="row section-actions credential-filter-bar">
+                <div class="credential-filter-switches">
+                  <label class="toggle-filter">
+                    <input id="ai-provider-enabled-only" type="checkbox" role="switch" checked />
+                    <span data-i18n="ui.enabled_only">Enabled only</span>
+                  </label>
+                </div>
+                <span class="native-select">
+                  <select id="ai-provider-type" aria-label="Filter by provider type" data-i18n-aria-label="ui.filter_by_ai_provider_type">
+                    <option value="" data-i18n="ui.all_types">All types</option>
+                  </select>
+                </span>
+                <input id="ai-provider-search" type="search" placeholder="Search AI providers" autocomplete="off"  data-i18n-placeholder="ui.search_ai_providers"/>
+                <button id="ai-provider-query-balances" class="labeled-icon-button" type="button" data-i18n="ui.query_balance">Query balance</button>
+              </div>
+            </div>
+            <div id="ai-providers-body" class="credential-list"></div>
           </div>
         </section>
 
@@ -435,8 +460,8 @@
             <div class="card">
               <div class="row spread section-toolbar">
                 <h2 data-i18n="ui.auth_files">Auth Files</h2>
-                <div class="row section-actions auth-filter-bar">
-                  <div class="auth-filter-switches">
+                <div class="row section-actions credential-filter-bar">
+                  <div class="credential-filter-switches">
                     <label class="toggle-filter">
                       <input id="account-auth-enabled-only" type="checkbox" role="switch" checked />
                       <span data-i18n="ui.enabled_only">Enabled only</span>
@@ -456,7 +481,7 @@
                   <button id="account-auth-refresh-filtered" class="labeled-icon-button" type="button" data-i18n="ui.update_quotas">Refresh quota</button>
                 </div>
               </div>
-              <div id="account-auth-files-body" class="auth-file-list"></div>
+              <div id="account-auth-files-body" class="credential-list"></div>
             </div>
           </section>
         </section>
@@ -568,6 +593,7 @@
       /*events.js*/
       /*logs.js*/
       /*auth-files.js*/
+      /*ai-providers.js*/
       /*account.js*/
       /*app.js*/
     </script>

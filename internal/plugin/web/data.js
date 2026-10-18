@@ -134,6 +134,10 @@ const authFilesQueries = Object.fromEntries(
     })
   ])
 );
+const aiProvidersQuery = createQuery(m("ui.ai_providers"), (providers) => {
+  updateAIProviders(providers);
+  return providers;
+});
 const eventKeysQuery = createQuery(m("ui.event_api_key_filter"));
 const UNASSIGNED_KEY = "__unassigned__";
 
@@ -502,19 +506,28 @@ async function mutateAdmin(method, path, data = null, options) {
   return result;
 }
 
-async function fetchModelPrices(models, account) {
+// Long selections split across requests, so that each URL stays within common proxy limits.
+const QUERY_BATCH_LENGTH = 3300;
+
+function batchedSearchParams(name, values) {
   const batches = [];
   let query = new URLSearchParams();
-  for (const model of models) {
-    const parameter = new URLSearchParams({ model }).toString();
-    if (parameter.length > 3300) throw new UIError(m("ui.model_id_is_too_long"));
-    if (query.size && query.toString().length + parameter.length + 1 > 3300) {
+  for (const value of values) {
+    const parameter = new URLSearchParams({ [name]: value }).toString();
+    if (query.size && query.toString().length + parameter.length + 1 > QUERY_BATCH_LENGTH) {
       batches.push(query);
       query = new URLSearchParams();
     }
-    query.append("model", model);
+    query.append(name, value);
   }
   if (query.size || !batches.length) batches.push(query);
+  return batches;
+}
+
+async function fetchModelPrices(models, account) {
+  if (models.some((model) => new URLSearchParams({ model }).toString().length > QUERY_BATCH_LENGTH))
+    throw new UIError(m("ui.model_id_is_too_long"));
+  const batches = batchedSearchParams("model", models);
   const prices = new Map();
   for (const [index, batch] of batches.entries()) {
     batch.set("include_custom", String(!account && index === 0));
@@ -647,6 +660,7 @@ function createPages(role) {
     analysis: analysisQueries[role],
     speed: speedQueries[role],
     authFiles: authFilesQueries[role],
+    aiProviders: aiProvidersQuery,
     eventKeys: eventKeysQuery,
     keyDirectory,
     ...Object.fromEntries(Object.entries(pagedLists[role]).map(([name, list]) => [name, list.query]))
@@ -696,6 +710,13 @@ function createPages(role) {
     const keyFilter = keyedSection(["eventKeys"], renderEventKeys);
     for (const tab of ["analysis", "request-events", "errors"]) result[tab].sections.unshift(keyFilter);
     result.keys = { editors: ["route"], sections: [keyedSection(["keys", "plans", "routes", "credentials"], renderKeys)] };
+    result["ai-providers"] = {
+      timeRange: true,
+      autoRefresh: true,
+      queries: [data.aiProviders],
+      load: (reload) => readAIProviders(reload),
+      sections: [section(["aiProviders"], renderAIProviders)]
+    };
     result.settings = {
       editors: ["plan", "route"],
       list: pagedLists[role].logs,

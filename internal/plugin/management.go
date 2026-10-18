@@ -47,6 +47,7 @@ const (
 	routeAuthQuotaReset         = "/auth-files/quota/reset"
 	routeAuthFileHistory        = "/auth-files/history"
 	routeAuthFilePeriodModels   = "/auth-files/history/models"
+	routeAIProviderUsage        = "/ai-providers/usage"
 )
 
 type managementEndpoint struct {
@@ -107,6 +108,7 @@ var managementEndpoints = []managementEndpoint{
 	{http.MethodGet, routeAuthFilePeriodModels, "View an auth file quota period's usage by model", func(a *App, req ManagementRequest) ManagementResponse {
 		return a.authFilePeriodModels(req, viewAccess{})
 	}},
+	{http.MethodGet, routeAIProviderUsage, "View configured AI provider credential usage", (*App).aiProviderUsage},
 }
 
 type resourceEndpoint struct {
