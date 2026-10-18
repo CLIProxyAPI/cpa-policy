@@ -535,7 +535,6 @@ function renderAuthFileRow(file, account) {
               role: "switch",
               checked: !file.disabled,
               "aria-label": m("ui.enable"),
-              "data-tip": "",
               disabled: adminUIState.authStatusSubmissions.has(file.auth_index),
               onchange: (event) => guard(() => setAuthFileEnabled(file, event.target.checked))
             })

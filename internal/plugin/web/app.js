@@ -473,7 +473,6 @@ function addLanguageControl(group) {
       "aria-haspopup": "menu",
       "aria-expanded": "false",
       "aria-label": m("language.select"),
-      "data-tip": m("language.select"),
       onclick: () => {
         if (menu.matches(":popover-open")) return menu.hidePopover();
         const current = window.billingI18n.current();

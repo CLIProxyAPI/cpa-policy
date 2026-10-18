@@ -506,7 +506,6 @@ function addPlanWindow(quotaWindow = {}) {
         type: "button",
         class: "icon-action window-delete",
         "aria-label": m("ui.delete_window"),
-        "data-tip": m("ui.delete_window"),
         onclick: () => {
           row.remove();
           syncPlanWindows();
