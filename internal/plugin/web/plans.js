@@ -100,7 +100,7 @@ function quotaWindowResetLabel(row, showCountdown) {
   const resetAt = new Date(row.end_at);
   const remaining = (resetAt.getTime() - Date.now()) / 1000;
   return (
-    compactResetDate(resetAt) + (showCountdown ? DISPLAY_SEPARATOR + (remaining <= 0 ? m("ui.expired") : compactResetAfter(remaining)) : "")
+    compactResetDate(resetAt) + (showCountdown ? DISPLAY_SEPARATOR + (remaining <= 0 ? m("ui.expired") : compactTimeUntil(remaining)) : "")
   );
 }
 

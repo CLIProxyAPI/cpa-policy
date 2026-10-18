@@ -240,7 +240,7 @@ function quotaResetMeta(row) {
   const resetAt = row.reset_at ? new Date(row.reset_at) : null;
   if (!resetAt || isNaN(resetAt.getTime())) return { at: "", after: "" };
   const after = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
-  return { at: compactResetDate(resetAt), after: compactResetAfter(after) };
+  return { at: compactResetDate(resetAt), after: compactTimeUntil(after) };
 }
 
 function quotaAmount(row) {
@@ -348,22 +348,15 @@ function renderAuthResetCredits(file, result) {
     el("div", { class: "auth-reset-credits-title", text: m("ui.reset_credits_expiry", { v0: timezone }) }),
     credits.map((credit, index) => {
       const expiresAt = new Date(credit.expires_at);
-      const time = Number.isFinite(expiresAt.getTime())
-        ? new Intl.DateTimeFormat("sv-SE", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: false
-          }).format(expiresAt)
-        : credit.expires_at || "—";
+      const left = (expiresAt.getTime() - Date.now()) / 1000;
+      const time = Number.isFinite(left)
+        ? [left > 0 ? compactTimeUntil(left, "left") : m("ui.expired"), DISPLAY_SEPARATOR, compactResetDate(expiresAt)]
+        : [credit.expires_at || "—"];
       return el(
         "div",
         { class: "auth-reset-credit" },
         el("span", { text: m("ui.reset_credit_number", { v0: index + 1 }) }),
-        el("span", { class: "auth-reset-credit-time", text: time })
+        el("span", { class: "auth-reset-credit-time" }, time)
       );
     })
   );

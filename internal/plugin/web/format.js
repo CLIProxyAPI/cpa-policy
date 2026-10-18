@@ -75,11 +75,11 @@ function compactResetDate(date) {
   return pad(date.getMonth() + 1) + "/" + pad(date.getDate()) + " " + pad(date.getHours()) + ":" + pad(date.getMinutes());
 }
 
-function compactResetAfter(seconds) {
-  if (seconds < 60) return m("ui.in_less_than_a_minute");
-  if (seconds >= 86400) return m("time.in_day", { count: Math.floor(seconds / 86400) });
-  if (seconds >= 3600) return m("time.in_hour", { count: Math.floor(seconds / 3600) });
-  return m("time.in_minute", { count: Math.floor(seconds / 60) });
+// Time until a moment in its largest whole unit, as "in 3 hours" or, with the left form, "3 hours left".
+function compactTimeUntil(seconds, form = "in") {
+  if (seconds < 60) return m(form === "left" ? "ui.less_than_a_minute_left" : "ui.in_less_than_a_minute");
+  const [unit, size] = seconds >= 86400 ? ["day", 86400] : seconds >= 3600 ? ["hour", 3600] : ["minute", 60];
+  return m("time." + form + "_" + unit, { count: Math.floor(seconds / size) });
 }
 
 function previewCredential(value) {
