@@ -90,11 +90,10 @@ type quotaRow struct {
 	Currency         string           `json:"currency,omitempty"`
 	ResetAt          string           `json:"reset_at,omitempty"`
 	ObservedAt       time.Time        `json:"observed_at,omitzero"`
-	// LimitKey names the limit whose windows a provider reports together, so a
-	// newer report of the limit replaces all of them. Other rows stand alone.
+	// LimitKey names the limit of a window that requests report; with the
+	// window's length it identifies the window from one report to the next.
 	LimitKey string `json:"limit_key,omitempty"`
-	// Usage is what CLIProxyAPI requests consumed in the window's current period,
-	// which began windowSeconds before ResetAt.
+	// Usage is what CLIProxyAPI requests consumed in the window's current period.
 	Usage         *billing.QuotaPeriodUsage `json:"usage,omitempty"`
 	windowSeconds int64
 	meter         *quotaMeter
@@ -150,7 +149,8 @@ func (a *App) authQuota(req ManagementRequest, access viewAccess) ManagementResp
 	if errQuota != nil {
 		return viewDetailedError(access, http.StatusBadGateway, "quota_failed", errQuota)
 	}
-	if errUsage := a.attachQuotaUsage(access.usageScope(), map[string]*authQuotaResponse{selected.AuthIndex: &result}); errUsage != nil {
+	credential := quotaCredential{selected.AuthIndex, authCategory(selected.Type)}
+	if errUsage := a.attachQuotaUsage(access.usageScope(), map[quotaCredential]*authQuotaResponse{credential: &result}); errUsage != nil {
 		return viewErrorResponse(access, errUsage)
 	}
 	return viewJSON(access, http.StatusOK, result)
@@ -254,17 +254,21 @@ func (a *App) listAuthFiles(access viewAccess, from, to time.Time) ([]authFileVi
 	for i := range views {
 		indexes[i] = views[i].AuthIndex
 	}
-	usage, errUsage := a.store.CredentialUsage(indexes, access.usageScope(), from, to)
+	usage, errUsage := a.store.CredentialUsageStats(indexes, access.usageScope(), from, to)
 	if errUsage != nil {
 		return nil, errUsage
 	}
-	quotas := make(map[string]*authQuotaResponse)
+	// Older reports describe no window that is still current.
+	headers, errHeaders := a.store.LatestQuotaHeaders(indexes, a.store.Now().Add(-quotaHistoryRange-quotaHistoryLookback))
+	if errHeaders != nil {
+		return nil, errHeaders
+	}
+	quotas := make(map[quotaCredential]*authQuotaResponse)
 	for i := range views {
-		value := usage[views[i].AuthIndex]
-		views[i].Usage = value.Stats
-		views[i].Quota = observedAuthQuota(views[i].Category, views[i].CacheRevision, value.Quota)
+		views[i].Usage = usage[views[i].AuthIndex]
+		views[i].Quota = observedAuthQuota(views[i].Category, views[i].CacheRevision, headers[views[i].AuthIndex])
 		if views[i].Quota != nil {
-			quotas[views[i].AuthIndex] = views[i].Quota
+			quotas[quotaCredential{views[i].AuthIndex, views[i].Category}] = views[i].Quota
 		}
 	}
 	if errUsage := a.attachQuotaUsage(access.usageScope(), quotas); errUsage != nil {
@@ -805,7 +809,7 @@ func appendCodexRateLimit(result *authQuotaResponse, limit codexLimit, info map[
 			continue
 		}
 		seconds, _ := intValue(value, "limit_window_seconds", "limitWindowSeconds")
-		window := quotaWindow{Role: role, Seconds: seconds, meter: limit.meter(role)}
+		window := quotaWindow{Role: role, Seconds: seconds, meter: limit.meter()}
 		if used, ok := floatValue(value, "used_percent", "usedPercent"); ok {
 			window.RemainingPercent = remainingPercent(100 - used)
 		} else if hasReached && reached || hasAllowed && !allowed {
@@ -898,8 +902,8 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 		seconds           int64
 		meter             *quotaMeter
 	}{
-		{"five_hour", "5-hour limit", claudeUnifiedLimit, fiveHours, claudeUnifiedMeter("5h")},
-		{"seven_day", "Weekly limit", claudeUnifiedLimit, week, claudeUnifiedMeter("7d")},
+		{"five_hour", "5-hour limit", claudeUnifiedLimit, fiveHours, &quotaMeter{}},
+		{"seven_day", "Weekly limit", claudeUnifiedLimit, week, &quotaMeter{}},
 		{"seven_day_oauth_apps", "OAuth Apps weekly limit", "", week, nil},
 		{"seven_day_opus", "Opus weekly limit", "", week, claudeModelMeter("opus")},
 		{"seven_day_sonnet", "Sonnet weekly limit", "", week, claudeModelMeter("sonnet")},

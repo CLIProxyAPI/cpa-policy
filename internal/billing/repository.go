@@ -14,10 +14,9 @@ type Repository interface {
 	RequestErrors(query RequestErrorQuery, since time.Time) (RequestErrorView, error)
 	Analysis(query RequestEventQuery, since time.Time) (AnalysisView, error)
 	AnalysisSpeed(query RequestEventQuery, since time.Time) (AnalysisSpeedView, error)
-	CredentialUsage(authIndexes []string, scope string, from, to time.Time) (map[string]CredentialUsage, error)
-	// QuotaReadings returns, in request order, the values a stored quota header
-	// reported on a credential between from and to, without consecutive repeats.
-	QuotaReadings(authIndex, header string, from, to time.Time) ([]QuotaReading, error)
+	CredentialUsageStats(authIndexes []string, scope string, from, to time.Time) (map[string]CredentialUsageStats, error)
+	LatestQuotaHeaders(authIndexes []string, since time.Time) (map[string][]QuotaHeaderObservation, error)
+	QuotaHeaderHistory(authIndex string, from, to time.Time) ([]QuotaHeaderObservation, error)
 	QuotaPeriodUsage(period QuotaPeriod, scope string) (QuotaPeriodUsage, error)
 
 	AppendPluginLog(entry PluginLog, cutoff time.Time) error

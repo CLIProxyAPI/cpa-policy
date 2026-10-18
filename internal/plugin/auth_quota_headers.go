@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"maps"
 	"math"
 	"net/http"
 	"regexp"
@@ -17,11 +16,12 @@ import (
 var codexQuotaGroup = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,120}$`)
 
 type quotaHeaderSample struct {
-	provider  string
-	plan      string
-	balance   string
-	unlimited *bool
-	windows   []quotaHeaderWindow
+	provider    string
+	plan        string
+	activeLimit string
+	balance     string
+	unlimited   *bool
+	windows     []quotaHeaderWindow
 }
 
 type quotaHeaderWindow struct {
@@ -66,12 +66,16 @@ func parseQuotaHeaders(provider string, input http.Header, at time.Time) quotaHe
 			}
 		}
 		sort.Strings(groups)
-		active := quotaLimitAlias(headers.Get("X-Codex-Active-Limit"))
-		additionalActive := false
-		for _, group := range groups {
-			additionalActive = additionalActive || active != "" && active == quotaLimitAlias(group)
+		// The ungrouped windows belong to the limit the response names: the main
+		// limit ("premium", or no name on older responses), a listed additional
+		// limit they copy, or another pool. Image requests report their pool's
+		// 24-hour window there, so the main limit keeps only its 5-hour and
+		// weekly windows.
+		active := headers.Get("X-Codex-Active-Limit")
+		if codexQuotaGroup.MatchString(active) {
+			sample.activeLimit = active
 		}
-		if !additionalActive {
+		if active == "" || quotaLimitAlias(active) == "premium" {
 			sample.appendCodexWindows(headers, "X-Codex-", codexMainLimit, at)
 		}
 		for _, group := range groups {
@@ -98,7 +102,7 @@ func parseQuotaHeaders(provider string, input http.Header, at time.Time) quotaHe
 				continue
 			}
 			sample.windows = append(sample.windows, quotaHeaderWindow{prefix: prefix, role: window.role, seconds: window.seconds,
-				usedPercent: used * 100, resetAt: quotaHeaderReset(headers, prefix+window.role+"-", "Reset", at), limitKey: claudeUnifiedLimit, meter: claudeUnifiedMeter(window.role)})
+				usedPercent: used * 100, resetAt: quotaHeaderReset(headers, prefix+window.role+"-", "Reset", at), limitKey: claudeUnifiedLimit, meter: &quotaMeter{}})
 		}
 	}
 	return sample
@@ -109,11 +113,12 @@ func (s *quotaHeaderSample) appendCodexWindows(headers http.Header, prefix strin
 		key := prefix + role + "-"
 		used, ok := finiteQuotaHeader(headers, key+"Used-Percent")
 		minutes, err := strconv.ParseInt(headers.Get(key+"Window-Minutes"), 10, 64)
-		if !ok || used < 0 || err != nil || minutes <= 0 || minutes > 366*24*60 {
+		if !ok || used < 0 || err != nil || minutes <= 0 || minutes > 366*24*60 ||
+			limit == codexMainLimit && minutes != 5*60 && minutes != 7*24*60 {
 			continue
 		}
 		s.windows = append(s.windows, quotaHeaderWindow{prefix: prefix, limitKey: limit.key, labelPrefix: limit.labelPrefix, role: role, seconds: minutes * 60,
-			usedPercent: used, resetAt: quotaHeaderReset(headers, key, "Reset-At", at), meter: limit.meter(role)})
+			usedPercent: used, resetAt: quotaHeaderReset(headers, key, "Reset-At", at), meter: limit.meter()})
 	}
 }
 
@@ -121,6 +126,9 @@ func (s quotaHeaderSample) headers() http.Header {
 	result := make(http.Header)
 	if s.plan != "" {
 		result.Set("X-Codex-Plan-Type", s.plan)
+	}
+	if s.activeLimit != "" {
+		result.Set("X-Codex-Active-Limit", s.activeLimit)
 	}
 	if s.balance != "" {
 		result.Set("X-Codex-Credits-Balance", s.balance)
@@ -199,14 +207,13 @@ func quotaLimitAlias(value string) string {
 }
 
 // observedAuthQuota rebuilds a credential's quota from its recorded reports,
-// oldest first. A report lists every window of each limit it carries, so the
-// newest report of a limit replaces all windows earlier reports gave it, and a
-// window the provider dropped, such as the 5-hour window after a plan change,
-// disappears.
+// oldest first. A response reports only the windows of the limit it used, so
+// each report updates just the windows it lists. A window drops out once its
+// limit is reported after the window's reset time without it, as the 5-hour
+// window is after an upgrade to a plan that has none.
 func observedAuthQuota(category, revision string, observations []billing.QuotaHeaderObservation) *authQuotaResponse {
 	var result *authQuotaResponse
-	var limits []string
-	windows := make(map[string][]quotaRow)
+	reportedAt := make(map[string]time.Time)
 	for _, observation := range observations {
 		if !strings.EqualFold(observation.Provider, category) {
 			continue
@@ -229,17 +236,22 @@ func observedAuthQuota(category, revision string, observations []billing.QuotaHe
 		if !decoded.CreditsUnlimitedObservedAt.IsZero() {
 			result.CreditsUnlimited, result.CreditsUnlimitedObservedAt = decoded.CreditsUnlimited, observation.At
 		}
-		reported := make(map[string][]quotaRow)
 		for _, row := range decoded.Quota {
-			if !slices.Contains(limits, row.LimitKey) {
-				limits = append(limits, row.LimitKey)
+			reportedAt[row.LimitKey] = observation.At
+			if index := slices.IndexFunc(result.Quota, row.sameWindow); index >= 0 {
+				result.Quota[index] = row
+			} else {
+				result.Quota = append(result.Quota, row)
 			}
-			reported[row.LimitKey] = append(reported[row.LimitKey], row)
 		}
-		maps.Copy(windows, reported)
 	}
-	for _, limit := range limits {
-		result.Quota = append(result.Quota, windows[limit]...)
+	if result == nil {
+		return nil
 	}
+	result.Quota = slices.DeleteFunc(result.Quota, func(row quotaRow) bool {
+		resetAt, err := time.Parse(time.RFC3339, row.ResetAt)
+		return err == nil && reportedAt[row.LimitKey].After(row.ObservedAt) && !reportedAt[row.LimitKey].Before(resetAt)
+	})
+	slices.SortStableFunc(result.Quota, compareQuotaWindows)
 	return result
 }

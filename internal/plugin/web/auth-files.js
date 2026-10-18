@@ -25,22 +25,24 @@ function authFileQuota(file, owner) {
   const observed = file.quota;
   if (!manual) return observed;
   if (!observed) return manual;
-  // Both sources list every window of a limit at once, so a limit observed after the manual query replaces its windows.
-  const newer = observed.quota.filter((row) => new Date(row.observed_at) > new Date(manual.fetched_at));
-  const replaced = new Set(newer.map(authQuotaLimitKey));
-  const limits = new Set([...manual.quota, ...newer].map(authQuotaLimitKey));
-  const quota = [...limits].flatMap((limit) =>
-    (replaced.has(limit) ? newer : manual.quota).filter((row) => authQuotaLimitKey(row) === limit)
+  // A request reports only the windows of the limit it used, so a window observed after the manual query replaces
+  // just that window. A queried window drops out once its limit is observed after its reset time without it.
+  const newer = observed.quota.filter((row) => Date.parse(row.observed_at) > Date.parse(manual.fetched_at));
+  const reportedAt = new Map();
+  for (const row of newer) reportedAt.set(row.limit_key, Math.max(reportedAt.get(row.limit_key) ?? 0, Date.parse(row.observed_at)));
+  const windows = new Map(
+    manual.quota.filter((row) => !(reportedAt.get(row.limit_key) >= Date.parse(row.reset_at))).map((row) => [authQuotaWindowKey(row), row])
   );
-  const result = { ...observed, ...manual, quota };
+  for (const row of newer) windows.set(authQuotaWindowKey(row), row);
+  const result = { ...observed, ...manual, quota: [...windows.values()] };
   for (const field of ["plan", "credit_balance", "credits_unlimited"])
-    if (new Date(observed[field + "_observed_at"]) > new Date(manual.fetched_at)) result[field] = observed[field];
+    if (Date.parse(observed[field + "_observed_at"]) > Date.parse(manual.fetched_at)) result[field] = observed[field];
   return result;
 }
 
-// Windows a provider reports together share a limit key; any other row stands alone.
-function authQuotaLimitKey(row) {
-  return JSON.stringify(row.limit_key ? [row.limit_key] : [row.group_label || "", row.label_prefix || "", row.label || ""]);
+// The label carries a window's length, so it tells the windows of one limit apart.
+function authQuotaWindowKey(row) {
+  return JSON.stringify([row.limit_key || "", row.group_label || "", row.label_prefix || "", row.label || ""]);
 }
 
 function authFileRoutingTag(file) {

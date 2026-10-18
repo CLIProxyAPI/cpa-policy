@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,5 +146,78 @@ func TestFetchedQuotaKeysUnifiedWindowsAndCoversModelFamilies(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing rows: %v", want)
+	}
+}
+
+func TestQuotaUsageFollowsPlanChangesAndIgnoresOtherPools(t *testing.T) {
+	app, _ := newAppWithPriceAndState(t, true)
+	now := app.store.Now()
+	base := now.Add(-241 * time.Hour).Truncate(time.Hour)
+	hour := func(value int) time.Time { return base.Add(time.Duration(value) * time.Hour) }
+	unix := func(value int) string { return strconv.FormatInt(hour(value).Unix(), 10) }
+	publish := func(at int, provider, model, apiKey string, tokens int64, headers http.Header) {
+		publishUsageRecord(t, app, UsageRecord{Provider: provider, AuthType: "oauth", AuthIndex: "codex-1", APIKey: apiKey,
+			Model: model, RequestedAt: hour(at), ResponseHeaders: headers, Detail: UsageDetail{InputTokens: tokens, TotalTokens: tokens}})
+	}
+	for _, event := range []struct {
+		at                      int
+		plan                    string
+		fiveHour, fiveHourReset int // fiveHour is -1 when the plan has no 5-hour window
+		weekly, weeklyReset     int
+		apiKey                  string
+		tokens                  int64
+	}{
+		{0, "plus", 10, 5, 5, 167, "sk-dummy-one", 100},
+		{1, "plus", 30, 5, 7, 167, "sk-dummy-one", 200},
+		{48, "plus", 5, 53, 20, 167, "sk-dummy-one", 400},
+		{95, "plus", 50, 100, 25, 167, "sk-dummy-one", 1600},
+		// Pro keeps only a weekly window, reported as the primary one, and restarts it.
+		{96, "prolite", -1, 0, 3, 264, "sk-dummy-one", 800},
+		// Back on Plus, the 5-hour window returns while the weekly one runs on.
+		{192, "plus", 2, 197, 40, 264, "sk-dummy-two", 3200},
+		{237, "plus", 20, 242, 45, 264, "sk-dummy-two", 6400},
+		{239, "plus", 25, 242, 46, 264, "sk-dummy-two", 100},
+	} {
+		headers := http.Header{"X-Codex-Plan-Type": {event.plan}, "X-Codex-Active-Limit": {"premium"}}
+		weeklyRole := "Secondary"
+		if event.fiveHour < 0 {
+			weeklyRole = "Primary"
+		} else {
+			headers["X-Codex-Primary-Used-Percent"] = []string{strconv.Itoa(event.fiveHour)}
+			headers["X-Codex-Primary-Window-Minutes"] = []string{"300"}
+			headers["X-Codex-Primary-Reset-At"] = []string{unix(event.fiveHourReset)}
+		}
+		headers["X-Codex-"+weeklyRole+"-Used-Percent"] = []string{strconv.Itoa(event.weekly)}
+		headers["X-Codex-"+weeklyRole+"-Window-Minutes"] = []string{"10080"}
+		headers["X-Codex-"+weeklyRole+"-Reset-At"] = []string{unix(event.weeklyReset)}
+		publish(event.at, "codex", "gpt-5.5", event.apiKey, event.tokens, headers)
+	}
+	// Image requests report their own pool's daily window under the main headers, unnamed on older responses.
+	image := func(at int, used string) http.Header {
+		return http.Header{"X-Codex-Primary-Used-Percent": {used}, "X-Codex-Primary-Window-Minutes": {"1440"}, "X-Codex-Primary-Reset-At": {unix(at + 24)}}
+	}
+	publish(238, "codex", "gpt-image-2", "sk-dummy-two", 50, image(238, "0"))
+	named := image(240, "10")
+	named.Set("X-Codex-Active-Limit", "images")
+	publish(240, "codex", "gpt-image-2", "sk-dummy-two", 70, named)
+	// A request to another provider on the same auth index belongs to none of these windows.
+	publish(238, "claude", "claude-sonnet-4-5", "sk-dummy-two", 9000, http.Header{
+		"Anthropic-Ratelimit-Unified-5h-Utilization": {"0.5"}, "Anthropic-Ratelimit-Unified-5h-Reset": {unix(242)}})
+	app.SetHostCaller(func(string, any) (json.RawMessage, error) {
+		return json.RawMessage(`{"files":[{"auth_index":"codex-1","name":"dummy.json","type":"codex"}]}`), nil
+	})
+	files, err := app.listAuthFiles(viewAccess{}, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The newest report is an image request's, yet the main limit keeps both windows and nothing else.
+	var labels []string
+	for _, row := range files[0].Quota.Quota {
+		labels = append(labels, row.Label)
+	}
+	usage := quotaUsageByLabel(t, files[0].Quota)
+	if strings.Join(labels, ",") != "5-hour limit,Weekly limit" || !files[0].Quota.Quota[0].ObservedAt.Equal(hour(239)) ||
+		usage["5-hour limit"].Tokens != 6620 || usage["Weekly limit"].Tokens != 10620 {
+		t.Fatalf("current windows: %+v", files[0].Quota.Quota)
 	}
 }

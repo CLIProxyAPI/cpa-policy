@@ -18,11 +18,15 @@ type memoryRepository struct {
 	closeFail       error
 }
 
-func (r *memoryRepository) CredentialUsage(authIndexes []string, scope string, from, to time.Time) (map[string]CredentialUsage, error) {
-	return map[string]CredentialUsage{}, r.fail
+func (r *memoryRepository) CredentialUsageStats([]string, string, time.Time, time.Time) (map[string]CredentialUsageStats, error) {
+	return map[string]CredentialUsageStats{}, r.fail
 }
 
-func (r *memoryRepository) QuotaReadings(authIndex, header string, from, to time.Time) ([]QuotaReading, error) {
+func (r *memoryRepository) LatestQuotaHeaders([]string, time.Time) (map[string][]QuotaHeaderObservation, error) {
+	return map[string][]QuotaHeaderObservation{}, r.fail
+}
+
+func (r *memoryRepository) QuotaHeaderHistory(string, time.Time, time.Time) ([]QuotaHeaderObservation, error) {
 	return nil, r.fail
 }
 

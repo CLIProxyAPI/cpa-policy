@@ -26,9 +26,10 @@ func TestUsageQuotaFollowsLatestLimitWindowsAndScopedStatistics(t *testing.T) {
 		APIKey: "sk-dummy-one", Model: "gpt-5.5", RequestedAt: at, ResponseHeaders: headers,
 		Detail: UsageDetail{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 50, TotalTokens: 120}}
 	publishUsageRecord(t, app, record)
-	record.RequestedAt = at.Add(time.Minute)
+	record.RequestedAt = at.Add(31 * time.Minute)
 	record.APIKey = "sk-dummy-two"
-	// After an upgrade to Pro the main limit has only a weekly window.
+	// After an upgrade to Pro the main limit has only a weekly window, so the
+	// 5-hour window, reset meanwhile, is gone.
 	record.ResponseHeaders = http.Header{
 		"X-Codex-Plan-Type":            {"prolite"},
 		"X-Codex-Primary-Used-Percent": {"35"}, "X-Codex-Primary-Window-Minutes": {"10080"},
@@ -69,8 +70,8 @@ func TestUsageQuotaFollowsLatestLimitWindowsAndScopedStatistics(t *testing.T) {
 		quota == nil || len(quota.Quota) != 1 || quota.Plan != "Pro 100" {
 		t.Fatalf("credential view: %+v, quota: %+v", files[0], quota)
 	}
-	if row := quota.Quota[0]; row.Label != "Weekly limit" || *row.RemainingPercent != 65 || !row.ObservedAt.Equal(at.Add(time.Minute)) ||
-		row.ResetAt != at.Add(30*time.Minute).UTC().Format(time.RFC3339) {
+	if row := quota.Quota[0]; row.Label != "Weekly limit" || *row.RemainingPercent != 65 || !row.ObservedAt.Equal(at.Add(31*time.Minute)) ||
+		row.ResetAt != at.Add(60*time.Minute).UTC().Format(time.RFC3339) {
 		t.Fatalf("dropped or late quota report changed windows: %+v", quota.Quota)
 	}
 	files, err = app.listAuthFiles(viewAccess{APIKey: true, Scope: billing.CallerScope("sk-dummy-one")}, time.Time{}, time.Time{})
@@ -143,5 +144,49 @@ func TestCodexQuotaPreservesAdditionalWindowsAndPartialCredits(t *testing.T) {
 	}
 	if quota.Quota[0].Label != "GPT-5.3-Codex-Spark 5-hour limit" || quota.Quota[1].Label != "Code Review Weekly limit" {
 		t.Fatalf("quota window labels: %+v", quota.Quota)
+	}
+}
+
+func TestCodexQuotaHeadersAttributeWindowsByTheirLimit(t *testing.T) {
+	at := time.Now().UTC()
+	window := func(prefix, minutes string) http.Header {
+		return http.Header{prefix + "Used-Percent": {"20"}, prefix + "Window-Minutes": {minutes}, prefix + "Reset-At": {"1800000000"}}
+	}
+	main := func(active, minutes string) http.Header {
+		headers := window("X-Codex-Primary-", minutes)
+		if active != "" {
+			headers.Set("X-Codex-Active-Limit", active)
+		}
+		return headers
+	}
+	additional := func(name string) http.Header {
+		headers := window("X-Codex-Feature-Primary-", "300")
+		headers.Set("X-Codex-Feature-Limit-Name", name)
+		return headers
+	}
+	for _, test := range []struct {
+		name    string
+		headers http.Header
+		want    string // labels, with * marking metered windows
+	}{
+		{"main limit", main("premium", "300"), "5-hour limit*"},
+		{"response before limit names", main("", "10080"), "Weekly limit*"},
+		{"image pool before limit names", main("", "1440"), ""},
+		{"image pool", main("images", "300"), ""},
+		{"main limit beyond its windows", main("premium", "1440"), ""},
+		{"Spark", additional("GPT-5.3-Codex-Spark"), "GPT-5.3-Codex-Spark 5-hour limit*"},
+		{"additional limit of unknown models", additional("Fancy Feature"), "Fancy Feature 5-hour limit"},
+	} {
+		sample := parseQuotaHeaders("codex", test.headers, at)
+		var labels []string
+		for _, row := range parseQuotaHeaders("codex", sample.headers(), at).quota(at).Quota {
+			if row.meter != nil {
+				row.Label += "*"
+			}
+			labels = append(labels, row.Label)
+		}
+		if strings.Join(labels, ",") != test.want || sample.headers().Get("X-Codex-Active-Limit") != test.headers.Get("X-Codex-Active-Limit") {
+			t.Errorf("%s: windows %v, stored %v", test.name, labels, sample.headers())
+		}
 	}
 }
