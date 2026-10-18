@@ -30,7 +30,7 @@ func (r *memoryRepository) QuotaHeaderHistory(string, time.Time, time.Time) ([]Q
 	return nil, r.fail
 }
 
-func (r *memoryRepository) QuotaPeriodUsage(period QuotaPeriod, scope string) (QuotaPeriodUsage, error) {
+func (r *memoryRepository) QuotaPeriodUsage(period QuotaPeriod, scope string, byModel bool) (QuotaPeriodUsage, error) {
 	return QuotaPeriodUsage{}, r.fail
 }
 

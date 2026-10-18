@@ -268,22 +268,47 @@ function quotaLabel(row) {
 // so it needs both a used share and recorded usage.
 function quotaEstimateScale(usedPercent, usage) { return usedPercent > 0 && usage.tokens > 0 ? 100 / usedPercent : 0; }
 
-function renderQuotaMetrics(usage, scale = 1) {
-  const total = Math.round(usage.tokens * scale);
-  const metric = (icon, label, value, detail) =>
-    el(
-      "span",
-      { class: "auth-quota-metric", "data-tip": detail },
-      el("span", { role: "img", "aria-label": label }, actionIcon(icon)),
-      value
-    );
+function renderQuotaMetrics(usage, scale = 1, tooltip = null) {
+  const metric = (icon, label, value) =>
+    el("span", { class: "auth-quota-metric" }, el("span", { role: "img", "aria-label": label }, actionIcon(icon)), value);
   return el(
     "span",
-    { class: "auth-quota-metrics", "data-tip": scale ? null : m("ui.quota_estimate_unavailable") },
-    metric("square-text", m("ui.tokens"), scale ? tokens(total) : "—", scale && total >= 1000 ? exactTokens(total) : null),
+    { class: "auth-quota-metrics", "data-tip": scale ? null : m("ui.quota_estimate_unavailable"), tooltip },
+    metric("square-text", m("ui.tokens"), scale ? tokens(Math.round(usage.tokens * scale)) : "—"),
     metric("circle-dollar-sign", m("ui.amount"), scale ? usd(usage.cost_usd * scale, 2) : "—")
   );
 }
+
+function renderModelUsageTable(models) {
+  const columns = [
+    [m("ui.requests"), (row) => tokens(row.requests, 2)],
+    [m("ui.input"), (row) => tokens(row.input_tokens)],
+    [m("ui.output"), (row) => tokens(row.output_tokens)],
+    [m("ui.cache_read"), (row) => tokens(row.cache_read_tokens)],
+    models.some((row) => row.cache_write_tokens > 0) && [m("ui.cache_write"), (row) => tokens(row.cache_write_tokens)],
+    [m("ui.cache_rate"), (row) => cacheReadRate(row.cache_read_tokens, row.input_tokens)],
+    [m("ui.cost"), (row) => usd(row.cost_usd, 2)]
+  ].filter(Boolean);
+  return el(
+    "table",
+    { class: "model-usage-table" },
+    el("thead", {}, el("tr", {}, el("th", { text: m("ui.model") }), columns.map(([label]) => el("th", { class: "num", text: label })))),
+    el(
+      "tbody",
+      {},
+      models.map((row) =>
+        el(
+          "tr",
+          {},
+          el("td", { text: row.model || m("ui.unknown_model") }),
+          columns.map(([, value]) => el("td", { class: "num", text: value(row) }))
+        )
+      )
+    )
+  );
+}
+
+function modelUsageTooltip(models) { return models?.length ? () => [renderModelUsageTable(models)] : null; }
 
 function renderQuotaBar(percent, label) {
   const known = Number.isFinite(percent);
@@ -307,7 +332,12 @@ function renderQuotaRow(row, estimate) {
   const percent = row.remaining_percent;
   const reset = quotaResetMeta(row);
   const elapsed = row.reset_at && new Date(row.reset_at).getTime() <= Date.now();
-  const usage = row.usage && renderQuotaMetrics(row.usage, estimate ? quotaEstimateScale(100 - percent, row.usage) : 1);
+  // The row sits inside the button that opens the drawer, so its tooltip is hover-only.
+  const usage =
+    row.usage &&
+    (estimate
+      ? renderQuotaMetrics(row.usage, quotaEstimateScale(100 - percent, row.usage))
+      : renderQuotaMetrics(row.usage, 1, modelUsageTooltip(row.usage.models)));
   const amount = quotaAmount(row);
   return el(
     "div",
@@ -551,7 +581,9 @@ function authUsageSummary(usage) {
 function renderAuthFileUsage(file) {
   const usage = file.usage || {};
   const { count, failed, success, total, cache } = authUsageSummary(usage);
-  const metric = (name, label, value, tooltip, secondary) => {
+  const breakdown = modelUsageTooltip(usage.models);
+  const totalTokens = breakdown ? el("span", { class: "breakdown-value", ...hoverTooltipProps(breakdown) }, tokens(total)) : tokens(total);
+  const metric = (name, label, value, secondary) => {
     const detail =
       secondary &&
       el(
@@ -567,7 +599,7 @@ function renderAuthFileUsage(file) {
         "div",
         { class: "auth-usage-metric" },
         el("span", { class: "auth-usage-label", text: label }),
-        el("span", { class: "auth-usage-value", "data-tip": tooltip }, value, secondary?.inline && detail)
+        el("span", { class: "auth-usage-value" }, value, secondary?.inline && detail)
       ),
       !secondary?.inline && detail
     );
@@ -581,18 +613,8 @@ function renderAuthFileUsage(file) {
     ")"
   ];
   return [
-    metric(
-      "requests",
-      m("ui.requests"),
-      requests,
-      count >= 1000 ? m("ui.auth_request_outcomes", { v0: int(count - failed), v1: int(failed) }) : null,
-      { label: m("ui.success_rate"), value: success }
-    ),
-    metric("tokens", m("ui.auth_total_tokens"), tokens(total), total >= 1000 ? exactTokens(total) : null, {
-      label: m("ui.cost"),
-      value: usd(usage.cost_usd, 2),
-      inline: true
-    }),
+    metric("requests", m("ui.requests"), requests, { label: m("ui.success_rate"), value: success }),
+    metric("tokens", m("ui.auth_total_tokens"), totalTokens, { label: m("ui.cost"), value: usd(usage.cost_usd, 2), inline: true }),
     metric("cache", m("ui.cache_rate"), cache)
   ];
 }
@@ -869,11 +891,14 @@ function renderAuthDrawerHistory() {
           ]
         : [el("div", { class: "muted small", text: m("ui.loading") })])
     );
+    $("auth-drawer-models").replaceChildren();
     switcher.replaceChildren();
     $("auth-drawer-periods").replaceChildren();
     return;
   }
+  const models = history.usage.models;
   $("auth-drawer-usage").replaceChildren(renderAuthDrawerUsage(history.usage));
+  $("auth-drawer-models").replaceChildren(...(models?.length ? [renderModelUsageTable(models)] : []));
   if (authDrawer.window >= history.windows.length) authDrawer.window = 0;
   switcher.replaceChildren(
     ...history.windows.map((window, index) =>
@@ -901,7 +926,7 @@ function retryAuthDrawerHistory() {
 }
 
 function renderAuthDrawerUsage(usage) {
-  const { count, success, total, cache } = authUsageSummary(usage);
+  const { count, success, total } = authUsageSummary(usage);
   const stat = (label, value, tooltip) =>
     el(
       "div",
@@ -915,8 +940,7 @@ function renderAuthDrawerUsage(usage) {
     stat(m("ui.requests"), tokens(count, 2), count >= 1000 ? int(count) : null),
     stat(m("ui.success_rate"), success),
     stat(m("ui.auth_total_tokens"), tokens(total), total >= 1000 ? exactTokens(total) : null),
-    stat(m("ui.cost"), usd(usage.cost_usd, 2)),
-    stat(m("ui.cache_rate"), cache)
+    stat(m("ui.cost"), usd(usage.cost_usd, 2))
   );
 }
 
@@ -934,13 +958,48 @@ function renderAuthDrawerPeriods() {
   );
 }
 
+// History lists period totals; a period's breakdown by model loads on its first hover.
+const authPeriodModels = new WeakMap();
+
+function periodModelsTooltip(period) {
+  if (!(period.usage.tokens > 0)) return null;
+  return () => {
+    const state = authPeriodModels.get(period);
+    if (state?.models) return [renderModelUsageTable(state.models)];
+    if (state?.error) {
+      authPeriodModels.delete(period);
+      return [el("div", { class: "hover-tooltip-body", text: state.error })];
+    }
+    if (!state) guard(() => loadPeriodModels(period));
+    return [el("div", { class: "hover-tooltip-body", text: m("ui.loading") })];
+  };
+}
+
+async function loadPeriodModels(period) {
+  const { account, file } = authDrawer;
+  const query = period.usage_query;
+  authPeriodModels.set(period, { loading: true });
+  try {
+    const params = new URLSearchParams({ auth_index: file.auth_index, from: query.start, to: query.end });
+    for (const model of query.models.include ?? []) params.append("include", model);
+    for (const model of query.models.exclude ?? []) params.append("exclude", model);
+    const path = "/auth-files/history/models?" + params;
+    const result = requireObject(account ? await accountAPI(path) : await plugin("GET", path), m("ui.quota_windows"));
+    authPeriodModels.set(period, { models: requireArray(result.models, m("ui.quota_windows")) });
+  } catch (error) {
+    if (error instanceof AuthError || error instanceof StaleRequestError) throw error;
+    authPeriodModels.set(period, { error: error.message || String(error) });
+  } finally { refreshHoverTooltip(); }
+}
+
 // Estimates need the usage of every request, which API key views do not have.
 function renderQuotaPeriod(period, category, estimate) {
   const remaining = Math.max(0, 100 - period.used_percent);
   const end = period.end || period.reset_at;
   const [tone, reason] = QUOTA_PERIOD_ENDS[period.end_reason] || ["ok", "ui.quota_period_running"];
   const range = quotaPeriodRange(new Date(period.start), end && new Date(end));
-  const usage = (label, metrics) => el("span", { class: "quota-period-usage" }, el("span", { text: label }), metrics);
+  const usage = (label, metrics, tooltip) =>
+    el("span", { class: "quota-period-usage", ...hoverTooltipProps(tooltip) }, el("span", { text: label }), metrics);
   return el(
     "div",
     { class: "auth-quota-row" },
@@ -955,7 +1014,7 @@ function renderQuotaPeriod(period, category, estimate) {
     el(
       "div",
       { class: "auth-quota-foot" },
-      usage(m("ui.quota_used"), renderQuotaMetrics(period.usage)),
+      usage(m("ui.quota_used"), renderQuotaMetrics(period.usage), periodModelsTooltip(period)),
       estimate && usage(m("ui.quota_projected"), renderQuotaMetrics(period.usage, quotaEstimateScale(period.used_percent, period.usage))),
       period.plans?.length > 0 &&
         el(

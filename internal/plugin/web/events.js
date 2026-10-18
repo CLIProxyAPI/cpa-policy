@@ -372,7 +372,7 @@ function renderRequestEvents(account = false) {
             ? el(
                 "span",
                 {
-                  class: "cost-value",
+                  class: "breakdown-value",
                   tabindex: "0",
                   "aria-label": m("ui.view_cost_breakdown"),
                   ...hoverTooltipProps(() => renderCostTooltip(cost, hasCacheWrite))

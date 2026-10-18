@@ -292,7 +292,9 @@ function scheduleHoverTooltipClose(next) {
   else hoverTooltipTimer = setTimeout(closeHoverTooltip, 150);
 }
 
-function hoverTooltipProps(content, enabled = true) { return { tabindex: enabled ? "0" : null, tooltip: enabled ? content : null }; }
+function hoverTooltipProps(content, enabled = Boolean(content)) {
+  return { tabindex: enabled ? "0" : null, tooltip: enabled ? content : null };
+}
 
 function refreshHoverTooltip() {
   if (!hoverTooltipAnchor) return;

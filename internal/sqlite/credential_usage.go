@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,33 +11,71 @@ import (
 	"cpa-key-billing/internal/billing"
 )
 
+// Unscoped, each credential groups its own requests by model, a sort small
+// enough to stay in memory. A scope reads its fewer requests at once through
+// its own index; the unary + keeps SQLite off the auth index.
 func (d *DB) CredentialUsageStats(authIndexes []string, scope string, from, to time.Time) (map[string]billing.CredentialUsageStats, error) {
-	filter, args := authIndexFilter(authIndexes)
-	filter += " AND at >= ? AND at < ?"
-	args = append(args, nanos(from), nanos(to))
-	if scope != "" {
-		filter += " AND scope = ?"
-		args = append(args, scope)
+	batches := [][]string{authIndexes}
+	if scope == "" {
+		batches = make([][]string, len(authIndexes))
+		for i := range authIndexes {
+			batches[i] = authIndexes[i : i+1]
+		}
 	}
 	result := make(map[string]billing.CredentialUsageStats)
-	rows, err := d.db.Query(`SELECT auth_index, count(*), coalesce(sum(failed != 0), 0),
-		coalesce(sum(uncached_input_tokens + cache_read_tokens + cache_write_tokens), 0),
-		coalesce(sum(cache_read_tokens), 0), coalesce(sum(billed_output_tokens), 0), coalesce(sum(total_usd), 0)
-		FROM request_events WHERE `+filter+` GROUP BY auth_index`, args...)
+	for _, batch := range batches {
+		filter, args := authIndexFilter(batch)
+		filter += " AND at >= ? AND at < ?"
+		args = append(args, nanos(from), nanos(to))
+		if scope != "" {
+			filter = "+" + filter + " AND scope = ?"
+			args = append(args, scope)
+		}
+		if err := d.addCredentialUsage(result, filter, args); err != nil {
+			return nil, fmt.Errorf("Read credential usage: %w", err)
+		}
+	}
+	return result, nil
+}
+
+func (d *DB) addCredentialUsage(result map[string]billing.CredentialUsageStats, filter string, args []any) error {
+	rows, err := d.db.Query(`SELECT auth_index, coalesce(sum(failed != 0), 0), `+modelUsageColumns+`
+		FROM request_events WHERE `+filter+` GROUP BY auth_index, model ORDER BY auth_index, input + output DESC, model`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("Read credential usage: %w", err)
+		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var authIndex string
-		var stats billing.CredentialUsageStats
-		if err := rows.Scan(&authIndex, &stats.Requests, &stats.Failed,
-			&stats.InputTokens, &stats.CacheReadTokens, &stats.OutputTokens, &stats.CostUSD); err != nil {
-			return nil, fmt.Errorf("Read credential usage: %w", err)
+		var failed int64
+		model, err := scanModelUsage(rows, &authIndex, &failed)
+		if err != nil {
+			return err
 		}
+		stats := result[authIndex]
+		stats.Requests += model.Requests
+		stats.Failed += failed
+		stats.InputTokens += model.InputTokens
+		stats.CacheReadTokens += model.CacheReadTokens
+		stats.OutputTokens += model.OutputTokens
+		stats.CostUSD += model.CostUSD
+		stats.Models = append(stats.Models, model)
 		result[authIndex] = stats
 	}
-	return result, rows.Err()
+	return rows.Err()
+}
+
+// modelUsageColumns sums a group of requests into the fields scanModelUsage reads.
+const modelUsageColumns = eventModelSQL + ` AS model, count(*),
+	coalesce(sum(uncached_input_tokens + cache_read_tokens + cache_write_tokens), 0) AS input,
+	coalesce(sum(billed_output_tokens), 0) AS output, coalesce(sum(cache_read_tokens), 0),
+	coalesce(sum(cache_write_tokens), 0), coalesce(sum(total_usd), 0)`
+
+func scanModelUsage(rows *sql.Rows, dest ...any) (billing.ModelUsage, error) {
+	var usage billing.ModelUsage
+	err := rows.Scan(append(dest, &usage.Model, &usage.Requests, &usage.InputTokens, &usage.OutputTokens,
+		&usage.CacheReadTokens, &usage.CacheWriteTokens, &usage.CostUSD)...)
+	return usage, err
 }
 
 func (d *DB) LatestQuotaHeaders(authIndexes []string, since time.Time) (map[string][]billing.QuotaHeaderObservation, error) {
@@ -148,7 +187,7 @@ func (d *DB) QuotaHeaderHistory(authIndex string, from, to time.Time) ([]billing
 	return history, nil
 }
 
-func (d *DB) QuotaPeriodUsage(period billing.QuotaPeriod, scope string) (billing.QuotaPeriodUsage, error) {
+func (d *DB) QuotaPeriodUsage(period billing.QuotaPeriod, scope string, byModel bool) (billing.QuotaPeriodUsage, error) {
 	filter := "auth_index = ? AND lower(provider) = ? AND at >= ? AND at < ?"
 	args := []any{period.AuthIndex, strings.ToLower(period.Provider), nanos(period.Start), nanos(period.End)}
 	if scope != "" {
@@ -170,12 +209,30 @@ func (d *DB) QuotaPeriodUsage(period billing.QuotaPeriod, scope string) (billing
 		filter += " AND NOT " + matchModels(period.Models.Exclude)
 	}
 	var usage billing.QuotaPeriodUsage
-	err := d.db.QueryRow(`SELECT
-		coalesce(sum(uncached_input_tokens + cache_read_tokens + cache_write_tokens + billed_output_tokens), 0),
-		coalesce(sum(total_usd), 0)
-		FROM request_events WHERE `+filter, args...).Scan(&usage.Tokens, &usage.CostUSD)
+	if !byModel {
+		err := d.db.QueryRow(`SELECT
+			coalesce(sum(uncached_input_tokens + cache_read_tokens + cache_write_tokens + billed_output_tokens), 0),
+			coalesce(sum(total_usd), 0)
+			FROM request_events WHERE `+filter, args...).Scan(&usage.Tokens, &usage.CostUSD)
+		if err != nil {
+			return usage, fmt.Errorf("Read quota period usage: %w", err)
+		}
+		return usage, nil
+	}
+	rows, err := d.db.Query(`SELECT `+modelUsageColumns+` FROM request_events WHERE `+filter+`
+		GROUP BY model ORDER BY input + output DESC, model`, args...)
 	if err != nil {
 		return usage, fmt.Errorf("Read quota period usage: %w", err)
 	}
-	return usage, nil
+	defer rows.Close()
+	for rows.Next() {
+		model, err := scanModelUsage(rows)
+		if err != nil {
+			return usage, fmt.Errorf("Read quota period usage: %w", err)
+		}
+		usage.Tokens += model.InputTokens + model.OutputTokens
+		usage.CostUSD += model.CostUSD
+		usage.Models = append(usage.Models, model)
+	}
+	return usage, rows.Err()
 }

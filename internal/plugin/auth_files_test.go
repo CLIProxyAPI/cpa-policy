@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -178,9 +179,14 @@ func TestAuthFilesStatisticsFollowTimeRangeAndAccountScope(t *testing.T) {
 				t.Fatalf("response=%s, want=%+v", response.Body, tc.want)
 			}
 			got := view.Files[0].Usage
+			if tc.want.Requests > 0 {
+				// Every request used gpt-5.5, so its row repeats the totals.
+				tc.want.Models = []billing.ModelUsage{{Model: "gpt-5.5", Requests: tc.want.Requests, InputTokens: tc.want.InputTokens,
+					OutputTokens: tc.want.OutputTokens, CacheReadTokens: tc.want.CacheReadTokens, CostUSD: got.CostUSD}}
+			}
 			assertCostClose(t, got.CostUSD, tc.want.CostUSD)
 			got.CostUSD = tc.want.CostUSD
-			if got != tc.want {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("response=%s, want=%+v", response.Body, tc.want)
 			}
 			quota := view.Files[0].Quota

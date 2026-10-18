@@ -171,6 +171,28 @@ func (a *App) authFileHistory(req ManagementRequest, access viewAccess) Manageme
 	return viewJSON(access, http.StatusOK, history)
 }
 
+// authFilePeriodModels breaks down by model a history period's usage, which
+// the request names by the period's usage query.
+func (a *App) authFilePeriodModels(req ManagementRequest, access viewAccess) ManagementResponse {
+	if access.APIKey && !access.Tracked {
+		return apiKeyUnauthorized()
+	}
+	selected, failure := a.resolveAuthFile(req, access)
+	if selected == nil {
+		return failure
+	}
+	period := billing.QuotaPeriod{AuthIndex: selected.AuthIndex, Provider: authCategory(selected.Type),
+		Models: billing.ModelMatch{Include: req.Query["include"], Exclude: req.Query["exclude"]}}
+	if err := timeRangeParams(req.Query, &period.Start, &period.End); err != nil {
+		return viewErrorResponse(access, err)
+	}
+	usage, err := a.store.QuotaPeriodUsage(access.usageScope(), []billing.QuotaPeriod{period}, true)
+	if err != nil {
+		return viewErrorResponse(access, err)
+	}
+	return viewJSON(access, http.StatusOK, map[string][]billing.ModelUsage{"models": append([]billing.ModelUsage{}, usage[0].Models...)})
+}
+
 // Resource routes are GET-only. Require a reset ID header and preserve it on retries.
 func (a *App) authQuotaReset(req ManagementRequest, access viewAccess) ManagementResponse {
 	if access.APIKey && !access.Tracked {

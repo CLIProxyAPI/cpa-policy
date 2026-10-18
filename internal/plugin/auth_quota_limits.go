@@ -257,7 +257,7 @@ func (a *App) attachQuotaUsage(scope string, quotas map[quotaCredential]*authQuo
 	if len(periods) == 0 {
 		return nil
 	}
-	usage, err := a.store.QuotaPeriodUsage(scope, periods)
+	usage, err := a.store.QuotaPeriodUsage(scope, periods, true)
 	if err != nil {
 		return err
 	}
@@ -282,6 +282,8 @@ type quotaWindowView struct {
 	Periods      []quotaPeriodView `json:"periods"`
 }
 
+// quotaPeriodView lists its usage as totals; UsageQuery breaks it down by
+// model on request.
 type quotaPeriodView struct {
 	Start       time.Time                `json:"start"`
 	End         time.Time                `json:"end,omitzero"`
@@ -290,6 +292,7 @@ type quotaPeriodView struct {
 	UsedPercent float64                  `json:"used_percent"`
 	Plans       []string                 `json:"plans,omitempty"`
 	Usage       billing.QuotaPeriodUsage `json:"usage"`
+	UsageQuery  billing.QuotaPeriod      `json:"usage_query"`
 }
 
 // readAuthFileHistory lists an auth file's usage over the last 30 days and the
@@ -320,15 +323,16 @@ func (a *App) readAuthFileHistory(credential quotaCredential, scope string) (aut
 			if !period.EndsAfter(response.From) {
 				break
 			}
+			query := history.row.usagePeriod(credential, period, now, exclusive)
 			window.Periods = append(window.Periods, quotaPeriodView{Start: period.Start, End: period.End, ResetAt: period.ResetAt,
-				EndReason: period.EndReason, UsedPercent: period.UsedPercent, Plans: period.Plans})
-			periods = append(periods, history.row.usagePeriod(credential, period, now, exclusive))
+				EndReason: period.EndReason, UsedPercent: period.UsedPercent, Plans: period.Plans, UsageQuery: query})
+			periods = append(periods, query)
 		}
 		if len(window.Periods) > 0 {
 			response.Windows = append(response.Windows, window)
 		}
 	}
-	usage, err := a.store.QuotaPeriodUsage(scope, periods)
+	usage, err := a.store.QuotaPeriodUsage(scope, periods, false)
 	if err != nil {
 		return response, err
 	}

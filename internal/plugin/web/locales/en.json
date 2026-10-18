@@ -718,7 +718,6 @@
   "ui.quota_used": "Used",
   "ui.quota_projected": "Projected",
   "ui.no_quota_windows_reported": "No requests reported a quota window in the last 30 days",
-  "ui.auth_request_outcomes": "Succeeded: {v0} · Failed: {v1}",
   "ui.quota_reset_but_cooldown_clear_failed": "Upstream quota was reset, but the local routing cooldown could not be cleared. Clear it in CPA before retrying.",
   "ui.execution_id": "Execution ID",
   "ui.trace_id": "Trace ID",

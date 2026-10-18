@@ -17,7 +17,7 @@ type Repository interface {
 	CredentialUsageStats(authIndexes []string, scope string, from, to time.Time) (map[string]CredentialUsageStats, error)
 	LatestQuotaHeaders(authIndexes []string, since time.Time) (map[string][]QuotaHeaderObservation, error)
 	QuotaHeaderHistory(authIndex string, from, to time.Time) ([]QuotaHeaderObservation, error)
-	QuotaPeriodUsage(period QuotaPeriod, scope string) (QuotaPeriodUsage, error)
+	QuotaPeriodUsage(period QuotaPeriod, scope string, byModel bool) (QuotaPeriodUsage, error)
 
 	AppendPluginLog(entry PluginLog, cutoff time.Time) error
 	PluginLogsPage(query PluginLogQuery) (PluginLogPage, error)

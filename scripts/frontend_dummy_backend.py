@@ -478,18 +478,52 @@ def auth_file_views(files, query, scope=""):
 
 
 def credential_usage(rows):
+    models = {}
+    for row in rows:
+        cost = row["cost"]
+        usage = models.setdefault(row["billing_model"] or row["upstream_model"], dict.fromkeys(
+            ("requests", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd"), 0))
+        usage["requests"] += 1
+        usage["input_tokens"] += sum(cost.get(field, 0) for field in ("uncached_input_tokens", "cache_read_tokens", "cache_write_tokens"))
+        usage["output_tokens"] += cost.get("billed_output_tokens", 0)
+        usage["cache_read_tokens"] += cost.get("cache_read_tokens", 0)
+        usage["cache_write_tokens"] += cost.get("cache_write_tokens", 0)
+        usage["cost_usd"] += cost.get("total_usd", 0)
     return {
         "requests": len(rows), "failed": sum(bool(row.get("failed")) for row in rows),
-        "input_tokens": sum(sum(row["cost"].get(field, 0) for field in
-                                ("uncached_input_tokens", "cache_read_tokens", "cache_write_tokens")) for row in rows),
-        "cache_read_tokens": sum(row["cost"].get("cache_read_tokens", 0) for row in rows),
-        "output_tokens": sum(row["cost"].get("billed_output_tokens", 0) for row in rows),
-        "cost_usd": sum(row["cost"].get("total_usd", 0) for row in rows),
+        "input_tokens": sum(usage["input_tokens"] for usage in models.values()),
+        "cache_read_tokens": sum(usage["cache_read_tokens"] for usage in models.values()),
+        "output_tokens": sum(usage["output_tokens"] for usage in models.values()),
+        "cost_usd": sum(usage["cost_usd"] for usage in models.values()),
+        "models": sorted(({"model": model, **usage} for model, usage in models.items()),
+                         key=lambda usage: (-usage["input_tokens"] - usage["output_tokens"], usage["model"])),
     }
 
 
-def quota_usage(tokens, cost_usd):
-    return {"usage": {"tokens": tokens, "cost_usd": cost_usd}}
+CODEX_MODELS = ("gpt-5.6-sol", "gpt-5.6-luna", "codex-auto-review")
+CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5")
+SPARK_MODELS = ("gpt-5.3-codex-spark",)
+
+
+def model_split(tokens, cost_usd, models):
+    """Splits a usage total across models, largest first; Claude models also write cache."""
+    weights = (7, 3, 1)[:len(models)]
+    split = []
+    for model, weight in zip(models, weights):
+        share = weight / sum(weights)
+        total = round(tokens * share)
+        input_tokens = round(total * 0.92)
+        split.append({
+            "model": model, "requests": max(1, total // 40_000), "input_tokens": input_tokens, "output_tokens": total - input_tokens,
+            "cache_read_tokens": round(input_tokens * 0.81),
+            "cache_write_tokens": round(input_tokens * 0.04) if model.startswith("claude") else 0,
+            "cost_usd": round(cost_usd * share, 4),
+        })
+    return [usage for usage in split if usage["input_tokens"] + usage["output_tokens"] > 0]
+
+
+def quota_usage(tokens, cost_usd, models=CODEX_MODELS):
+    return {"usage": {"tokens": tokens, "cost_usd": cost_usd, "models": model_split(tokens, cost_usd, models)}}
 
 
 def quota_row(label, remaining_percent, reset_seconds, **extra):
@@ -544,8 +578,8 @@ AUTH_FILE_QUOTAS = {
         "plan": "Team",
         "rate_limit_reset_credits_available_count": 1,
         "quota": [
-            quota_row("5 小时限额", 76, 12600, limit_key="unified", **quota_usage(3_104_822, 8.42)),
-            quota_row("周限额", 59, 388800, limit_key="unified", **quota_usage(21_733_906, 57.8)),
+            quota_row("5 小时限额", 76, 12600, limit_key="unified", **quota_usage(3_104_822, 8.42, CLAUDE_MODELS)),
+            quota_row("周限额", 59, 388800, limit_key="unified", **quota_usage(21_733_906, 57.8, CLAUDE_MODELS)),
             {
                 "label": "额外用量",
                 "used": 12.5,
@@ -574,15 +608,15 @@ AUTH_FILE_QUOTAS = {
     },
     "auth-demo-kimi": {
         "quota": [
-            quota_row("5 小时限额", 48, 7200, **quota_usage(2_405_118, 1.27)),
-            quota_row("周限额", 69, 345600, **quota_usage(4_822_391, 2.61)),
+            quota_row("5 小时限额", 48, 7200, **quota_usage(2_405_118, 1.27, ("kimi-k3",))),
+            quota_row("周限额", 69, 345600, **quota_usage(4_822_391, 2.61, ("kimi-k3",))),
         ],
     },
     "auth-demo-xai-active": {
         "credit_balance": "12.34",
         "credit_currency": "USD",
         "quota": [
-            quota_row("周限额", 78, 410400, **quota_usage(5_310_027, 6.94)),
+            quota_row("周限额", 78, 410400, **quota_usage(5_310_027, 6.94, ("grok-4.7", "grok-build-0.1"))),
             {
                 "label": "月度额度",
                 "used": 8.5,
@@ -590,7 +624,7 @@ AUTH_FILE_QUOTAS = {
                 "remaining_percent": 83,
                 "currency": "USD",
                 "reset_at": iso(NOW + timedelta(seconds=1814400)),
-                **quota_usage(7_102_448, 9.12),
+                **quota_usage(7_102_448, 9.12, ("grok-4.7", "grok-build-0.1")),
             },
         ],
     },
@@ -625,15 +659,18 @@ def localized_quota_labels(rows):
     return rows
 
 
-def quota_period(start, length, used, tokens, cost_usd, plans=(), end=None, reason=""):
-    period = {"start": iso(start), "reset_at": iso(start + length), "used_percent": used,
-              "plans": list(plans), "usage": {"tokens": tokens, "cost_usd": cost_usd}}
+def quota_period(start, length, used, tokens, cost_usd, plans=(), end=None, reason="", models=CODEX_MODELS):
+    """A history period lists usage totals; _models splits them when the drawer asks for a breakdown."""
+    period = {"start": iso(start), "reset_at": iso(start + length), "used_percent": used, "plans": list(plans),
+              "usage": {"tokens": tokens, "cost_usd": cost_usd},
+              "usage_query": {"start": iso(start), "end": iso(min(end or start + length, NOW)), "models": {}},
+              "_models": models}
     if reason:
         period.update(end=iso(end or start + length), end_reason=reason)
     return period
 
 
-def daily_quota_periods(days, length, plans=(), skip=()):
+def daily_quota_periods(days, length, plans=(), skip=(), models=CODEX_MODELS):
     """Past periods, one a day, with deterministic usage."""
     periods = []
     for day in days:
@@ -642,7 +679,7 @@ def daily_quota_periods(days, length, plans=(), skip=()):
         used = (day * 37) % 88 + 9
         tokens = used * 187_431 + day * 1_237
         periods.append(quota_period(NOW - timedelta(days=day, hours=9), length, used, tokens, round(tokens * 7.9e-7, 2),
-                                    plans, reason="scheduled"))
+                                    plans, reason="scheduled", models=models))
     return periods
 
 
@@ -678,22 +715,22 @@ AUTH_FILE_HISTORY = {
                            round(67.31 + week * 5.44, 2), ["Pro 200"], reason="scheduled") for week in range(1, 5)],
         ]},
         {"label": "5 小时限额", "label_prefix": "GPT-5.3-Codex-Spark ", "periods": [
-            quota_period(NOW - timedelta(days=3, hours=4), FIVE_HOURS, 12, 1_204_877, 0.94, ["Pro 200"], reason="scheduled"),
-            quota_period(NOW - timedelta(days=11, hours=8), FIVE_HOURS, 4, 380_105, 0.3, ["Pro 200"], reason="scheduled"),
+            quota_period(NOW - timedelta(days=3, hours=4), FIVE_HOURS, 12, 1_204_877, 0.94, ["Pro 200"], reason="scheduled", models=SPARK_MODELS),
+            quota_period(NOW - timedelta(days=11, hours=8), FIVE_HOURS, 4, 380_105, 0.3, ["Pro 200"], reason="scheduled", models=SPARK_MODELS),
         ]},
         {"label": "周限额", "label_prefix": "GPT-5.3-Codex-Spark ", "periods": [
-            quota_period(NOW - timedelta(days=4), WEEK, 12, 1_584_982, 1.24, ["Pro 200"]),
+            quota_period(NOW - timedelta(days=4), WEEK, 12, 1_584_982, 1.24, ["Pro 200"], models=SPARK_MODELS),
         ]},
     ],
     "auth-demo-claude": [
         {"label": "5 小时限额", "periods": [
-            quota_period(NOW - timedelta(hours=1, minutes=30), FIVE_HOURS, 24, 3_104_822, 8.42),
-            *daily_quota_periods(range(1, 31), FIVE_HOURS, skip={4, 5, 11, 12, 18, 19, 25, 26}),
+            quota_period(NOW - timedelta(hours=1, minutes=30), FIVE_HOURS, 24, 3_104_822, 8.42, models=CLAUDE_MODELS),
+            *daily_quota_periods(range(1, 31), FIVE_HOURS, skip={4, 5, 11, 12, 18, 19, 25, 26}, models=CLAUDE_MODELS),
         ]},
         {"label": "周限额", "periods": [
-            quota_period(NOW - timedelta(days=2, hours=12), WEEK, 41, 21_733_906, 57.8),
+            quota_period(NOW - timedelta(days=2, hours=12), WEEK, 41, 21_733_906, 57.8, models=CLAUDE_MODELS),
             *[quota_period(NOW - timedelta(days=2 + 7 * week, hours=12), WEEK, 55 + week * 9, 30_118_440 + week * 2_008_310,
-                           round(80.06 + week * 5.34, 2), reason="scheduled") for week in range(1, 5)],
+                           round(80.06 + week * 5.34, 2), reason="scheduled", models=CLAUDE_MODELS) for week in range(1, 5)],
         ]},
     ],
 }
@@ -709,9 +746,22 @@ def auth_file_history(query, scope=""):
     windows = []
     for window in AUTH_FILE_HISTORY.get(auth_index, []):
         localized = localized_quota_labels([window])[0]
-        localized["periods"] = sorted(window["periods"], key=lambda period: period["start"], reverse=True)
+        localized["periods"] = sorted(({key: value for key, value in period.items() if key != "_models"} for period in window["periods"]),
+                                      key=lambda period: period["start"], reverse=True)
         windows.append(localized)
     return {"from": iso(since), "to": iso(NOW), "usage": credential_usage(rows), "windows": windows}
+
+
+def auth_file_period_models(query):
+    auth_index = query.get("auth_index", [""])[0]
+    if not any(item["auth_index"] == auth_index for item in AUTH_FILES):
+        return None
+    bounds = (query.get("from", [""])[0], query.get("to", [""])[0])
+    for window in AUTH_FILE_HISTORY.get(auth_index, []):
+        for period in window["periods"]:
+            if (period["usage_query"]["start"], period["usage_query"]["end"]) == bounds:
+                return {"models": model_split(period["usage"]["tokens"], period["usage"]["cost_usd"], period["_models"])}
+    return {"models": []}
 
 
 KEY_PROFILES = [
@@ -1592,6 +1642,8 @@ def payload_for(path, query):
         return auth_file_quota(query)
     if path == f"{API_BASE}/auth-files/history":
         return auth_file_history(query)
+    if path == f"{API_BASE}/auth-files/history/models":
+        return auth_file_period_models(query)
     if path == f"{API_BASE}/prices/reference":
         term = query.get("q", [""])[0].lower()
         return {"prices": [
@@ -1717,6 +1769,7 @@ class Handler(BaseHTTPRequestHandler):
             f"{RESOURCE_BASE}/auth-files/quota",
             f"{RESOURCE_BASE}/auth-files/quota/reset",
             f"{RESOURCE_BASE}/auth-files/history",
+            f"{RESOURCE_BASE}/auth-files/history/models",
         }
         if parsed.path in resource_paths:
             if not authorization.startswith("Bearer ") or authorization[7:] not in api_keys:
@@ -1752,6 +1805,14 @@ class Handler(BaseHTTPRequestHandler):
                 payload = auth_file_quota(query) if auth_index in allowed else None
                 if payload is None:
                     self.send_json(404, {"error": {"message": "认证文件不存在或不支持限额查询"}})
+                else:
+                    self.send_json(200, payload)
+            elif parsed.path.endswith("/auth-files/history/models"):
+                query = parse_qs(parsed.query)
+                allowed = {item["auth_index"] for item in account_auth_files(index)}
+                payload = auth_file_period_models(query) if query.get("auth_index", [""])[0] in allowed else None
+                if payload is None:
+                    self.send_json(404, {"error": {"message": "认证文件不存在"}})
                 else:
                     self.send_json(200, payload)
             elif parsed.path.endswith("/auth-files/history"):

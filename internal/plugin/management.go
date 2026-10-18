@@ -46,6 +46,7 @@ const (
 	routeAuthQuota              = "/auth-files/quota"
 	routeAuthQuotaReset         = "/auth-files/quota/reset"
 	routeAuthFileHistory        = "/auth-files/history"
+	routeAuthFilePeriodModels   = "/auth-files/history/models"
 )
 
 type managementEndpoint struct {
@@ -103,6 +104,9 @@ var managementEndpoints = []managementEndpoint{
 	{http.MethodGet, routeAuthFileHistory, "View 30-day auth file usage and quota periods", func(a *App, req ManagementRequest) ManagementResponse {
 		return a.authFileHistory(req, viewAccess{})
 	}},
+	{http.MethodGet, routeAuthFilePeriodModels, "View an auth file quota period's usage by model", func(a *App, req ManagementRequest) ManagementResponse {
+		return a.authFilePeriodModels(req, viewAccess{})
+	}},
 }
 
 type resourceEndpoint struct {
@@ -129,6 +133,7 @@ var resourceEndpoints = []resourceEndpoint{
 	{routeAuthQuota, (*App).authQuota},
 	{routeAuthQuotaReset, (*App).authQuotaReset},
 	{routeAuthFileHistory, (*App).authFileHistory},
+	{routeAuthFilePeriodModels, (*App).authFilePeriodModels},
 }
 
 func managementRegistration() ManagementRegistrationResponse {

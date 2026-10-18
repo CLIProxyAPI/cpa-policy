@@ -313,6 +313,13 @@ h2 { font-size: 15px; margin: 0 0 12px; }
   padding: 16px;
   margin-bottom: var(--page-gap);
 }
+.inset-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
 button {
   appearance: none;
   min-height: var(--button-min-height, 35px);
@@ -1455,7 +1462,7 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
 .drawer-section > :empty { display: none; }
 .drawer-section h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
 .drawer-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
-.drawer-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.drawer-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
 .drawer-stat { display: grid; align-content: start; gap: 3px; padding: 10px 12px; }
 .drawer-stat-label { overflow: hidden; color: var(--text-tertiary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-stat-value {
@@ -1465,6 +1472,8 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.drawer-table { padding: 0; }
+.drawer-table tbody tr:last-child td { border-bottom: 0; }
 .quota-period-list > .auth-quota-row { padding-block: 12px; border-top: 1px solid var(--border-color); }
 .quota-period-list > .auth-quota-row:first-child { padding-top: 0; border-top: 0; }
 .quota-period-usage { display: inline-flex; align-items: center; gap: 6px; }
@@ -1510,13 +1519,6 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
 .selection-list label.disabled { cursor: not-allowed; opacity: 0.55; }
 .selection-list label.disabled:hover, .routing-option:disabled:hover { background: transparent; }
 .settings-card-list { padding-bottom: 0; }
-.inset-card {
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-}
 .settings-entry-header, .event-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
 .settings-entry-header { align-items: flex-start; margin-bottom: 10px; }
 .settings-entry-title { min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
@@ -1587,6 +1589,12 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
 .hover-tooltip-body { margin: 0; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tooltip-metrics { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 24px; margin: 0; }
 .tooltip-metrics dd { margin: 0; color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; }
+.breakdown-value {
+  display: inline-block;
+  cursor: help;
+  text-decoration: underline dotted var(--text-tertiary);
+  text-underline-offset: 3px;
+}
 .key-route-more { color: var(--text-tertiary); line-height: 1; }
 .key-route-actions { margin-top: 5px; }
 .key-route-actions > button.link { min-height: 22px; font-size: 12px; }
@@ -1954,7 +1962,6 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
 }
 .request-event-cell-line { display: flex; align-items: center; gap: 4px; min-height: 20px; white-space: nowrap; }
 .request-event-detail { min-height: 20px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cost-value { display: inline-block; cursor: help; text-decoration: underline dotted var(--text-tertiary); text-underline-offset: 3px; }
 .hover-tooltip:has(.cost-tooltip-grid) { max-width: min(480px, calc(100vw - 24px)); }
 .cost-tooltip-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 .cost-tooltip-summary { display: flex; gap: 10px; margin-bottom: 8px; color: var(--text-secondary); }
@@ -1977,6 +1984,12 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
   border-top: 1px solid var(--border-color);
   font-weight: 600;
 }
+/* Host table header fills would stand out on the card or tooltip around this table. */
+.model-usage-table { --table-header-bg: transparent; width: 100%; font-size: 12px; overflow-wrap: normal; }
+.model-usage-table th, .model-usage-table td { padding: 4px 8px; }
+.model-usage-table th { white-space: normal; }
+.model-usage-table td { white-space: nowrap; }
+.hover-tooltip:has(.model-usage-table) { max-width: min(720px, calc(100vw - 24px)); overflow-x: auto; }
 .event-load-state {
   display: flex;
   min-height: 42px;

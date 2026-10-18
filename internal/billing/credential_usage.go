@@ -6,12 +6,25 @@ import (
 )
 
 type CredentialUsageStats struct {
-	Requests        int64   `json:"requests"`
-	Failed          int64   `json:"failed"`
-	InputTokens     int64   `json:"input_tokens"`
-	CacheReadTokens int64   `json:"cache_read_tokens"`
-	OutputTokens    int64   `json:"output_tokens"`
-	CostUSD         float64 `json:"cost_usd"`
+	Requests        int64        `json:"requests"`
+	Failed          int64        `json:"failed"`
+	InputTokens     int64        `json:"input_tokens"`
+	CacheReadTokens int64        `json:"cache_read_tokens"`
+	OutputTokens    int64        `json:"output_tokens"`
+	CostUSD         float64      `json:"cost_usd"`
+	Models          []ModelUsage `json:"models,omitempty"`
+}
+
+// ModelUsage is one model's part of a usage total, most tokens first.
+// InputTokens include cached ones.
+type ModelUsage struct {
+	Model            string  `json:"model"`
+	Requests         int64   `json:"requests"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
 }
 
 func (s *Store) CredentialUsageStats(authIndexes []string, scope string, from, to time.Time) (map[string]CredentialUsageStats, error) {
@@ -52,28 +65,32 @@ func (s *Store) QuotaHeaderHistory(authIndex string, from, to time.Time) ([]Quot
 // QuotaPeriod selects the requests to Provider on AuthIndex made from Start
 // until End whose upstream model matches Models.
 type QuotaPeriod struct {
-	AuthIndex, Provider string
-	Start, End          time.Time
-	Models              ModelMatch
+	AuthIndex, Provider string     `json:"-"`
+	Start               time.Time  `json:"start"`
+	End                 time.Time  `json:"end"`
+	Models              ModelMatch `json:"models"`
 }
 
 // ModelMatch selects upstream models containing one of Include and none of
 // Exclude, ignoring case. An empty Include matches every model.
 type ModelMatch struct {
-	Include []string
-	Exclude []string
+	Include []string `json:"include,omitempty"`
+	Exclude []string `json:"exclude,omitempty"`
 }
 
 type QuotaPeriodUsage struct {
-	Tokens  int64   `json:"tokens"`
-	CostUSD float64 `json:"cost_usd"`
+	Tokens  int64        `json:"tokens"`
+	CostUSD float64      `json:"cost_usd"`
+	Models  []ModelUsage `json:"models,omitempty"`
 }
 
-func (s *Store) QuotaPeriodUsage(scope string, periods []QuotaPeriod) ([]QuotaPeriodUsage, error) {
+// QuotaPeriodUsage sums each period's requests. Breaking them down by model
+// costs about twice as much.
+func (s *Store) QuotaPeriodUsage(scope string, periods []QuotaPeriod, byModel bool) ([]QuotaPeriodUsage, error) {
 	return withRepository(s, func(repo Repository) ([]QuotaPeriodUsage, error) {
 		usage := make([]QuotaPeriodUsage, len(periods))
 		for i, period := range periods {
-			value, err := repo.QuotaPeriodUsage(period, scope)
+			value, err := repo.QuotaPeriodUsage(period, scope, byModel)
 			if err != nil {
 				return nil, err
 			}
