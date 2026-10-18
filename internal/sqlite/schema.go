@@ -12,7 +12,9 @@ var indexes = map[string][]index{
 	"request_events": {
 		{"at", "at, id, failed"},
 		{"scope_at", "scope, at, id, failed"},
-		{"auth_at", "auth_index, at"},
+		// Covers credential usage, so its sums never read the wide rows.
+		{"auth_usage", "auth_index, at, provider, billing_model, upstream_model, failed, " +
+			"uncached_input_tokens, cache_read_tokens, cache_write_tokens, billed_output_tokens, total_usd"},
 		{"model_at", eventModelSQL + ", at"},
 	},
 	"request_errors": {
