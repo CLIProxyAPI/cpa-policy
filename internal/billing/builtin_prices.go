@@ -5,20 +5,8 @@ import "strings"
 // Builtin prices are shipped with the plugin and are intentionally not persisted.
 var builtinPrices = map[string]CustomPrice{
 	NormalizeModelID("codex-auto-review"): {
-		ModelID: "codex-auto-review",
-		PriceRates: PriceRates{
-			InputPer1M:      0.2,
-			OutputPer1M:     1.2,
-			CacheReadPer1M:  float64Ptr(0.02),
-			CacheWritePer1M: float64Ptr(0.25),
-			LongContext: &LongContextPrice{
-				ThresholdInputTokens: 272000,
-				InputPer1M:           0.4,
-				OutputPer1M:          1.8,
-				CacheReadPer1M:       float64Ptr(0.04),
-				CacheWritePer1M:      float64Ptr(0.5),
-			},
-		},
+		ModelID:    "codex-auto-review",
+		PriceRates: PriceRates{InputPer1M: 0, OutputPer1M: 0},
 	},
 	NormalizeModelID("gpt-image-1.5"): {
 		ModelID: "gpt-image-1.5",

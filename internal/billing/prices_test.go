@@ -44,13 +44,9 @@ func TestResolveBuiltinPrice(t *testing.T) {
 		t.Fatalf("non-exact model matched builtin price: %+v", price)
 	}
 	price = ResolveBuiltinPrice("codex-auto-review")
-	if price.Source != PriceSourceBuiltin || price.InputPer1M != 0.2 || price.OutputPer1M != 1.2 ||
-		price.CacheReadPer1M != 0.02 || price.CacheWritePer1M != 0.25 {
+	if price.Source != PriceSourceBuiltin || price.InputPer1M != 0 || price.OutputPer1M != 0 ||
+		price.CacheReadPer1M != 0 || price.CacheWritePer1M != 0 || price.LongContext != nil {
 		t.Fatalf("codex-auto-review builtin price = %+v", price)
-	}
-	if tier := price.LongContext; tier == nil || tier.ThresholdInputTokens != 272000 ||
-		tier.InputPer1M != 0.4 || tier.OutputPer1M != 1.8 || tier.CacheReadPer1M != 0.04 || tier.CacheWritePer1M != 0.5 {
-		t.Fatalf("codex-auto-review long context price = %+v", tier)
 	}
 	if price := ResolveBuiltinPrice("unknown"); price.Source != PriceSourceNone {
 		t.Fatalf("unknown model has a builtin price: %+v", price)
