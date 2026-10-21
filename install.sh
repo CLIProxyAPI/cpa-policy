@@ -2,14 +2,14 @@
 
 set -eu
 
-repository="haowang02/cpa-plugin-key-billing"
-plugin_name="cpa-key-billing"
+repository="${CPA_PLUGIN_REPOSITORY:-}"
+plugin_name="cpa-codex-controls"
 plugin_dir="$(pwd)/plugins"
 tmp_dir=""
 staged_file=""
 
 fail() {
-  printf 'cpa-key-billing: %s\n' "$*" >&2
+  printf 'cpa-codex-controls: %s\n' "$*" >&2
   exit 1
 }
 
@@ -35,8 +35,12 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
+[ -n "$repository" ] || fail "set CPA_PLUGIN_REPOSITORY to your published GitHub owner/repository"
+printf '%s\n' "$repository" | LC_ALL=C awk '/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/ { valid=1 } END { exit !valid }' \
+  || fail "CPA_PLUGIN_REPOSITORY must be owner/repository"
+
 command -v curl >/dev/null 2>&1 || fail "curl is required to download the plugin"
-command -v tar >/dev/null 2>&1 || fail "tar is required to extract the plugin"
+command -v unzip >/dev/null 2>&1 || fail "unzip is required to extract the plugin"
 
 case "$(uname -s)" in
   Darwin)
@@ -75,7 +79,7 @@ version="$(
 )"
 [ -n "$version" ] || fail "latest release has an invalid tag: ${release_tag}"
 
-asset="${plugin_name}_${version}_${target_os}_${target_arch}.tar.gz"
+asset="${plugin_name}_${version}_${target_os}_${target_arch}.zip"
 plugin_file="${plugin_name}.${extension}"
 download_url="https://github.com/${repository}/releases/download/${release_tag}/${asset}"
 checksums_url="https://github.com/${repository}/releases/download/${release_tag}/checksums.txt"
@@ -97,7 +101,7 @@ actual_checksum="$(checksum_file "$archive")"
 [ "$actual_checksum" = "$expected_checksum" ] \
   || fail "download checksum mismatch"
 
-tar -xzf "$archive" -C "$tmp_dir" "$plugin_file" \
+unzip -q "$archive" "$plugin_file" -d "$tmp_dir" \
   || fail "release archive does not contain ${plugin_file}"
 [ -s "${tmp_dir}/${plugin_file}" ] || fail "release archive contains an empty ${plugin_file}"
 

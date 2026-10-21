@@ -1,89 +1,58 @@
 package plugin
 
 import (
-	"container/list"
+	"cpa-codex-controls/internal/settings"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net/http"
 	"sync"
-
-	"cpa-key-billing/internal/billing"
-	"cpa-key-billing/internal/sqlite"
 )
 
 type App struct {
-	store                 *billing.Store
-	hostCaller            HostCaller
-	requestOrigins        map[requestOriginKey]*list.Element
-	requestOriginOrder    list.List
-	admissionsMu          sync.Mutex
-	admissions            map[string]*requestAdmission
-	routingMu             sync.Mutex
-	credentials           map[string]credentialView
-	credentialIdentities  map[string]billing.CredentialProviderSelector
-	credentialRefsByIndex map[string]string
-	scheduler             subsetScheduler
-	pending               map[string]pendingRouteLog
-	pendingSequence       uint64
-}
-
-func (a *App) SetHostCaller(caller HostCaller) {
-	a.hostCaller = caller
+	store            *settings.Store
+	hostCaller       HostCaller
+	admissionsMu     sync.Mutex
+	admissions       map[string]*requestAdmission
+	upstreamRequests map[string]string
+	upstreamCounts   map[string]int
+	upstreamQueues   map[string][]*upstreamWaiter
+	upstreamQueued   map[string]*upstreamWaiter
+	admissionSignal  chan struct{}
+	stopped          bool
 }
 
 func NewApp() *App {
-	return newApp(billing.NewStore(openRepository, nil))
+	return &App{store: settings.NewStore(), admissions: map[string]*requestAdmission{}, upstreamRequests: map[string]string{}, upstreamCounts: map[string]int{}, upstreamQueues: map[string][]*upstreamWaiter{}, upstreamQueued: map[string]*upstreamWaiter{}, admissionSignal: make(chan struct{})}
 }
-
-func newApp(store *billing.Store) *App {
-	return &App{
-		store:                 store,
-		requestOrigins:        make(map[requestOriginKey]*list.Element),
-		admissions:            make(map[string]*requestAdmission),
-		credentials:           make(map[string]credentialView),
-		credentialIdentities:  make(map[string]billing.CredentialProviderSelector),
-		credentialRefsByIndex: make(map[string]string),
-		pending:               make(map[string]pendingRouteLog),
-	}
-}
-
-func openRepository(path string) (billing.Repository, error) {
-	return sqlite.Open(path)
-}
-
-// HandleMethod dispatches one host RPC call. A panic anywhere below is
-// converted into an error envelope: the host fuses a panicking plugin, and
-// taking the whole proxy down over a billing bug is not an acceptable trade.
+func (a *App) SetHostCaller(caller HostCaller) { a.hostCaller = caller }
 func (a *App) HandleMethod(method string, request []byte) (response []byte, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			response = nil
 			err = fmt.Errorf("Plugin call %s panicked: %v", method, recovered)
 			if a != nil && a.store != nil {
-				a.store.AddPluginLog(billing.PluginLogError, "%v", err)
+				a.store.AddPluginLog("error", "%v", err)
 			}
 		}
 	}()
 	return a.handleMethod(method, request)
 }
-
 func (a *App) handleMethod(method string, request []byte) ([]byte, error) {
 	switch method {
 	case MethodPluginRegister, MethodPluginReconfigure:
 		if errConfigure := a.configure(request); errConfigure != nil {
-			a.store.AddPluginLog(billing.PluginLogError, "Failed to apply plugin configuration: %v", errConfigure)
+			a.store.AddPluginLog("error", "Failed to apply plugin configuration: %v", errConfigure)
 			return nil, errConfigure
 		}
 		return OKEnvelope(registration())
 	case MethodRequestInterceptBefore:
 		return a.interceptBeforeAuth(request)
+	case "request.normalize":
+		return OKEnvelope(struct{}{})
 	case MethodRequestInterceptAfter:
 		return a.interceptAfterAuth(request)
 	case MethodRequestComplete:
 		return a.completeRequest(request)
-	case MethodSchedulerPick:
-		return a.pickCredential(request)
 	case MethodUsageHandle:
 		return a.handleUsage(request)
 	case MethodQuotaIdentifier:
@@ -100,102 +69,47 @@ func (a *App) handleMethod(method string, request []byte) ([]byte, error) {
 		return ErrorEnvelope("unknown_method", "Unsupported plugin method: "+method, http.StatusNotFound), nil
 	}
 }
-
 func (a *App) Shutdown() {
 	if a == nil || a.store == nil {
 		return
 	}
 	a.store.Close()
+	a.admissionsMu.Lock()
+	a.stopped = true
+	a.signalAdmissionsLocked()
+	a.upstreamRequests = make(map[string]string)
+	a.upstreamCounts = make(map[string]int)
+	a.admissionsMu.Unlock()
 }
-
 func (a *App) configure(raw []byte) error {
 	var req LifecycleRequest
 	if len(raw) > 0 {
-		if errUnmarshal := json.Unmarshal(raw, &req); errUnmarshal != nil {
-			return fmt.Errorf("Parse plugin lifecycle request: %w", errUnmarshal)
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return fmt.Errorf("Parse plugin lifecycle request: %w", err)
 		}
 	}
-	cfg, errDecode := billing.DecodeConfig(req.ConfigYAML)
-	if errDecode != nil {
-		return errDecode
+	cfg, err := settings.DecodeConfig(req.ConfigYAML)
+	if err != nil {
+		return err
 	}
-	if errConfigure := func() error {
-		a.routingMu.Lock()
-		defer a.routingMu.Unlock()
-		previous := a.store.ConfigCredentials()
-		if err := a.store.Configure(cfg); err != nil {
-			return err
-		}
-		a.scheduler.configure(cfg.Routing, cfg.Enabled)
-		if loaded := a.store.ConfigCredentials(); !maps.Equal(previous, loaded) {
-			a.replaceSyncedCredentials(previous, loaded)
-		}
-		return nil
-	}(); errConfigure != nil {
-		return errConfigure
+	if err = a.store.Configure(cfg); err != nil {
+		return err
 	}
-	// Refresh records its result; a download failure does not disable custom prices.
-	_, _ = a.store.EnsureReferencePrices()
+	a.admissionsMu.Lock()
+	a.signalAdmissionsLocked()
+	a.admissionsMu.Unlock()
+	a.store.AddPluginLog("info", "Plugin configuration applied")
 	return nil
 }
-
 func registration() Registration {
-	defaults := billing.DefaultConfig()
-	return Registration{
-		SchemaVersion: SchemaVersion,
-		Metadata: Metadata{
-			Name:             PluginName,
-			Version:          Version,
-			Author:           PluginName,
-			GitHubRepository: GitHubRepository,
-			Logo:             pluginLogo,
-			ConfigFields: []ConfigField{
-				{
-					Name:        "routing",
-					Default:     defaults.Routing,
-					Type:        "object",
-					Description: "Credential routing: strategy (round-robin, weighted-round-robin, fill-first), session-affinity, and session-affinity-ttl. Applies to credential-restricted routes.",
-				},
-				{
-					Name:        "debug",
-					Default:     defaults.Debug,
-					Type:        "boolean",
-					Description: "Record debug logs, including routing and reference price matching",
-				},
-				{
-					Name:        "codex_fast_mode_billing",
-					Default:     defaults.CodexFastModeBilling,
-					Type:        "boolean",
-					Description: "Bill Codex priority requests at 2.5 times the standard cost",
-				},
-				{
-					Name:        "mask_api_key_view_emails",
-					Default:     defaults.MaskAPIKeyViewEmails,
-					Type:        "boolean",
-					Description: "Mask email addresses in API key account responses",
-				},
-				{
-					Name:        "allow_api_key_quota_reset",
-					Default:     defaults.AllowAPIKeyQuotaReset,
-					Type:        "boolean",
-					Description: "Allow API key users to reset Codex and Claude auth file quotas using upstream resets",
-				},
-				{
-					Name:        "state_file",
-					Default:     defaults.StateFile,
-					Type:        "string",
-					Description: "Billing database file path",
-				},
-			},
-		},
-		Capabilities: Capabilities{
-			RequestInterceptor:        true,
-			RequestLifecyclePlugin:    true,
-			UsagePlugin:               true,
-			ManagementAPI:             true,
-			Scheduler:                 true,
-			SchedulerAcrossPriorities: true,
-			QuotaProvider:             true,
-		},
-	}
+	defaults := settings.DefaultConfig()
+	return Registration{SchemaVersion: SchemaVersion, Metadata: Metadata{
+		Name: PluginName, Version: Version, Author: PluginName, GitHubRepository: GitHubRepository, Logo: pluginLogo,
+		ConfigFields: []ConfigField{
+			{Name: "concurrency", Type: "object", Default: defaults.Concurrency, Description: "Bounded waiting queues and request-scoped timeouts for accounts with a positive concurrency limit."},
+			{Name: "custom_location", Type: "object", Default: defaults.CustomLocation, Description: "Opt-in global location. Disabled by default; individual account settings take precedence."},
+			{Name: "credential_policies", Type: "object", Default: map[string]any{}, Description: "Concurrency and timezone policies keyed by CPA auth_index. Zero concurrency means unlimited."},
+			{Name: "debug", Type: "boolean", Default: false, Description: "Record plugin debug diagnostics."},
+			{Name: "diagnostics_file", Type: "string", Default: defaults.DiagnosticsFile, Description: "Separate diagnostic database. Existing error events and plugin logs are imported read-only from the former state_file."},
+		}}, Capabilities: Capabilities{RequestInterceptor: true, RequestLifecyclePlugin: true, UsagePlugin: true, ManagementAPI: true, QuotaProvider: true}}
 }

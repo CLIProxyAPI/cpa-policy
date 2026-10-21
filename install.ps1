@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$repository = "haowang02/cpa-plugin-key-billing"
-$pluginName = "cpa-key-billing"
+$repository = $env:CPA_PLUGIN_REPOSITORY
+$pluginName = "cpa-codex-controls"
 $pluginFile = "$pluginName.dll"
 $pluginDir = Join-Path (Get-Location).Path "plugins"
 $tempDir = $null
@@ -56,6 +56,9 @@ function Get-LatestRelease {
 }
 
 try {
+    if ([string]::IsNullOrWhiteSpace($repository) -or $repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        Fail "set CPA_PLUGIN_REPOSITORY to your published GitHub owner/repository"
+    }
     if ($env:OS -ne "Windows_NT") {
         Fail "this installer only supports Windows"
     }

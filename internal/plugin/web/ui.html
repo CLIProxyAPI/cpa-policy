@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title data-i18n="ui.api_key_billing">API Key Billing</title>
+    <title data-i18n="controls.title">Account Controls</title>
     <script>
       /*standalone.js*/
     </script>
@@ -21,14 +21,10 @@
     <div class="wrap">
       <section id="gate" class="card gate hidden" aria-labelledby="gate-title">
         <div class="gate-top">
-          <h1 id="gate-title" data-i18n="ui.choose_an_access_method">Choose an access method</h1>
+          <h1 id="gate-title" data-i18n="ui.management_key">Management key</h1>
           <div class="standalone-actions">
             <button type="button" class="icon-action" data-page-action="theme" aria-label="Switch theme" data-i18n-aria-label="ui.switch_theme"></button>
           </div>
-        </div>
-        <div class="segmented-control" role="tablist" aria-label="Access method" data-i18n-aria-label="ui.access_method">
-          <button id="gate-mode-admin" type="button" role="tab" aria-selected="true" class="active" data-i18n="ui.management_key">Management key</button>
-          <button id="gate-mode-account" type="button" role="tab" aria-selected="false" data-i18n="ui.api_key_access">API key</button>
         </div>
         <form id="gate-form">
           <input id="gate-username" class="hidden" type="text" name="access-role" autocomplete="username" value="admin" />
@@ -44,211 +40,29 @@
 
       <main id="app" class="hidden">
         <header class="head app-header">
-          <div class="app-title"><h1><span data-lucide-icon="key" aria-hidden="true"></span><span data-i18n="ui.api_key_billing">API Key Billing</span></h1></div>
+          <div class="app-title"><h1><span data-lucide-icon="key" aria-hidden="true"></span><span data-i18n="controls.title">Account Controls</span></h1></div>
           <div class="standalone-actions" aria-label="Page actions" data-i18n-aria-label="ui.page_actions">
             <button type="button" class="icon-action" data-page-action="theme" aria-label="Switch theme" data-i18n-aria-label="ui.switch_theme"></button>
             <button type="button" class="icon-action" data-page-action="logout" aria-label="Sign out" data-i18n-aria-label="ui.sign_out"></button>
           </div>
         </header>
 
-        <div class="page-tabs-row">
-          <nav class="page-navigation" aria-label="Management views" data-i18n-aria-label="ui.management_views">
-            <div class="page-tab-switcher">
-              <div class="tabs">
-                <button type="button" data-tab="keys" class="active">API Key</button>
-                <button type="button" data-tab="analysis" data-i18n="ui.analysis">Analysis</button>
-                <button type="button" data-tab="request-events" data-i18n="ui.request_events">Request events</button>
-                <button type="button" data-tab="errors" data-i18n="ui.error_events">Error events</button>
-                <button type="button" data-tab="auth-files" data-i18n="ui.auth_files">Auth Files</button>
-                <button type="button" data-tab="ai-providers" data-i18n="ui.ai_providers">AI Providers</button>
-                <button type="button" data-tab="settings" data-i18n="ui.settings">Settings</button>
-              </div>
-              <span class="native-select page-tab-select">
-                <select id="page-tab-select" aria-label="Select view" data-i18n-aria-label="ui.select_view"></select>
-              </span>
-            </div>
-            <div class="page-tab-tools">
-              <button
-                id="privacy-mask"
-                class="icon-action privacy-mask-button"
-                type="button"
-                aria-pressed="false"
-                data-tip="Blur API keys, labels, and account emails"
-                data-i18n-data-tip="ui.blur_api_keys_labels_and_account_emails"
-              ></button>
-              <button type="button" class="icon-action" data-page-action="refresh" aria-label="Refresh" data-i18n-aria-label="ui.refresh"></button>
-            </div>
-          </nav>
-          <div id="page-tab-actions" class="page-tab-actions hidden">
-            <span id="shared-key-filter" class="native-select mask-select page-key-filter hidden">
-              <select id="analysis-key" aria-label="Filter by API key" data-i18n-aria-label="ui.filter_by_api_key"> <option value="" data-i18n="ui.all_api_keys">All API keys</option> </select>
-            </span>
-            <div id="shared-time-filter" class="time-range-control hidden">
-              <button id="shared-time-trigger" class="time-range-trigger" type="button" aria-haspopup="dialog" aria-expanded="false">
-                <span class="time-range-icon" data-lucide-icon="clock" aria-hidden="true"></span>
-                <span id="shared-time-label" data-i18n="ui.last_30_days">Last 30 days</span>
-                <span class="time-range-chevron" data-lucide-icon="chevron-down" aria-hidden="true"></span>
-              </button>
-              <div id="shared-time-popover" class="time-range-popover hidden" role="dialog" aria-label="Select time range" data-i18n-aria-label="ui.select_time_range"></div>
-            </div>
-            <span id="auto-refresh-control" class="native-select auto-refresh-control hidden">
-              <span class="native-select-icon" data-lucide-icon="timer" aria-hidden="true"></span>
-              <select id="auto-refresh" aria-label="Auto refresh interval" data-i18n-aria-label="ui.auto_refresh_interval"></select>
-            </span>
-            <button id="events-export" class="labeled-icon-button hidden" type="button" data-i18n="ui.export">Export</button>
-          </div>
-        </div>
-        <div id="shared-time-backdrop" class="time-range-backdrop hidden"></div>
 
-        <div id="admin-data-status" class="notice err" role="status"></div>
-        <section id="tab-keys">
-          <div class="card">
-            <div class="row spread section-toolbar">
-              <h2>API Key</h2>
-              <div class="row section-actions">
-                <input id="key-filter" placeholder="Search API keys, labels, or plans" class="wide-search"  data-i18n-placeholder="ui.search_api_keys_labels_or_plans"/>
-                <div class="row key-toolbar-buttons">
-                  <label class="toggle-filter">
-                    <input id="keys-include-deleted" type="checkbox" role="switch" />
-                    <span data-i18n="ui.include_deleted">Include deleted</span>
-                  </label>
-                  <button id="keys-import-labels" class="labeled-icon-button" type="button" data-i18n="ui.import_labels">Import labels</button>
-                  <button id="keys-reset-all" class="labeled-icon-button">
-                    <span data-lucide-icon="rotate-cw-clock" aria-hidden="true"></span>
-                    <span data-i18n="ui.reset_all_quotas">Reset all quotas</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div id="keys-body"></div>
-          </div>
-        </section>
-
-        <section id="tab-analysis" class="hidden"><div id="analysis-body"></div></section>
-
-        <section id="tab-plans" class="hidden">
-          <div class="card">
-            <div class="row spread settings-section-header"> <h2 data-i18n="ui.subscription_plans">Subscription plans</h2> <button id="plan-new" type="button" data-i18n="ui.create_plan">Create plan</button> </div>
-            <div id="plans-body"></div>
-          </div>
-          <dialog id="plan-dialog" class="settings-dialog plan-dialog">
-            <h2 id="plan-dialog-title" data-i18n="ui.create_plan">Create plan</h2>
-            <div class="editor-state notice hidden"></div>
-            <input id="plan-id" type="hidden" />
-            <div class="plan-details">
-              <label class="field"> <span data-i18n="ui.plan_name">Plan name</span> <input id="plan-name" placeholder="Team quota"  data-i18n-placeholder="ui.team_quota"/> </label>
-              <label class="field"> <span data-i18n="ui.cycle_mode">Reset schedule</span>
-                <span class="native-select"><select id="plan-cycle-mode">
-                  <option value="independent" data-i18n="ui.independent_cycles">Per-key schedule</option>
-                  <option value="unified" data-i18n="ui.shared_cycles">Shared schedule</option>
-                </select></span>
-              </label>
-            </div>
-            <div class="row spread plan-windows-heading">
-              <span class="small muted" data-i18n="ui.quota_windows">Quota windows</span>
-              <button id="plan-window-add" type="button" class="link small" data-i18n="ui.add_window">Add window</button>
-            </div>
-            <div id="plan-windows"></div>
-            <div class="selection-section">
-              <div class="small muted" data-i18n="ui.bind_api_keys">Assign API keys</div>
-              <div id="plan-key-list" class="selection-list"></div>
-            </div>
-            <div class="row dialog-actions">
-              <button id="plan-cancel" type="button" data-i18n="ui.cancel">Cancel</button>
-              <button id="plan-save" class="primary" type="button" data-i18n="ui.save">Save</button>
-            </div>
-          </dialog>
-        </section>
-
-        <section id="tab-routes" class="hidden">
-          <div class="card">
-            <div class="row spread settings-section-header"> <h2 data-i18n="ui.routing_rules">Routing rules</h2> <button id="route-new" type="button" data-i18n="ui.create_rule">Create rule</button> </div>
-            <div id="routes-body"></div>
-          </div>
-          <dialog id="route-dialog" class="settings-dialog route-dialog">
-            <h2 id="route-dialog-title" data-i18n="ui.create_rule">Create rule</h2>
-            <div class="editor-state notice hidden"></div>
-            <input id="route-id" type="hidden" />
-            <div class="route-form-toolbar">
-              <label class="field"> <span data-i18n="ui.rule_name">Rule name</span> <input id="route-name" placeholder="Codex auth files"  data-i18n-placeholder="ui.codex_auth_files"/> </label>
-              <label class="field"> <span data-i18n="ui.filter">Filter</span> <input id="route-rule-search" type="search" placeholder="Search models or credentials"  data-i18n-placeholder="ui.search_models_or_credentials"/> </label>
-              <div class="row compact-actions">
-                <button id="route-rule-all" type="button" class="link" data-i18n="ui.allow_all">Allow all</button>
-                <button id="route-rule-deny-all" type="button" class="link" data-i18n="ui.deny_all">Deny all</button>
-                <button id="route-rule-none" type="button" class="link" data-i18n="ui.clear">Clear</button>
-              </div>
-            </div>
-            <div id="route-rule-list" class="routing-list route-rule-list"></div>
-            <div class="selection-section">
-              <div class="small muted" data-i18n="ui.bind_api_keys">Assign API keys</div>
-              <div id="route-key-list" class="selection-list"></div>
-            </div>
-            <div class="row dialog-actions">
-              <button id="route-cancel" type="button" data-i18n="ui.cancel">Cancel</button>
-              <button id="route-save" class="primary" type="button" data-i18n="ui.save">Save</button>
-            </div>
-          </dialog>
-        </section>
-
-        <section id="tab-prices" class="hidden">
-          <div class="card">
-            <div class="row spread section-toolbar">
-              <h2 data-i18n="ui.model_pricing">Model pricing</h2>
-              <div class="row section-actions">
-                <input id="price-filter" placeholder="Search models"  data-i18n-placeholder="ui.search_models"/>
-                <button id="price-reference-refresh" data-i18n="ui.update_references">Update references</button>
-                <button id="price-new" data-i18n="ui.add_pricing">Add pricing</button>
-              </div>
-            </div>
-            <div id="prices-body"></div>
-            <p id="price-status" class="muted small price-footnote"></p>
-          </div>
-        </section>
-
-        <section id="tab-request-events" class="hidden">
-          <div class="card event-list-card">
-            <div class="row spread section-toolbar">
-              <h2 data-i18n="ui.request_events">Request events</h2>
-              <div class="row section-actions event-card-actions">
-                <span class="native-select">
-                  <select id="request-event-model" aria-label="Filter by model" data-i18n-aria-label="ui.filter_by_model"> <option value="" data-i18n="ui.all_models">All models</option> </select>
-                </span>
-                <span class="native-select mask-select">
-                  <select id="request-event-source" aria-label="Filter by source" data-i18n-aria-label="ui.filter_by_source"> <option value="" data-i18n="ui.all_sources">All sources</option> </select>
-                </span>
-                <span class="native-select">
-                  <select id="request-event-status" aria-label="Filter by result" data-i18n-aria-label="ui.filter_by_result">
-                    <option value="" data-i18n="ui.all_results">All results</option>
-                    <option value="false" data-i18n="ui.succeeded">Succeeded</option>
-                    <option value="true" data-i18n="ui.failed">Failed</option>
-                  </select>
-                </span>
-                <button id="request-events-filter-clear" class="link" type="button" disabled data-i18n="ui.clear_filters">Clear filters</button>
-              </div>
-            </div>
-            <div id="request-events-body" class="event-list-region"></div>
-            <div class="event-list-footer"><span id="request-event-note" class="muted small"></span></div>
-          </div>
-        </section>
-
-        <section id="tab-errors" class="hidden">
-          <div class="card event-list-card">
-            <div class="row spread section-toolbar">
-              <h2 data-i18n="ui.error_events">Error events</h2>
-              <div class="row section-actions event-card-actions">
-                <span class="native-select"> <select id="error-model" aria-label="Filter by model" data-i18n-aria-label="ui.filter_by_model"> <option value="" data-i18n="ui.all_models">All models</option> </select> </span>
-                <span class="native-select mask-select"> <select id="error-source" aria-label="Filter by source" data-i18n-aria-label="ui.filter_by_source"> <option value="" data-i18n="ui.all_sources">All sources</option> </select> </span>
-                <span class="native-select">
-                  <select id="error-type" aria-label="Filter by error type" data-i18n-aria-label="ui.filter_by_error_type"> <option value="" data-i18n="ui.all_error_types">All error types</option> </select>
-                </span>
-                <button id="errors-filter-clear" class="link" type="button" disabled data-i18n="ui.clear_filters">Clear filters</button>
-              </div>
-            </div>
-            <div id="errors-body" class="event-list-region"></div>
-            <div class="event-list-footer"><span id="error-note" class="muted small"></span></div>
-          </div>
-        </section>
-
+ <div class="page-tabs-row">
+  <nav class="page-navigation" aria-label="Management views" data-i18n-aria-label="ui.management_views">
+   <div class="page-tab-switcher"><div class="tabs">
+    <button type="button" data-tab="auth-files" class="active" data-i18n="ui.auth_files">Auth Files</button>
+    <button type="button" data-tab="ai-providers" data-i18n="ui.ai_providers">AI Providers</button>
+    <button type="button" data-tab="errors" data-i18n="ui.error_events">Error events</button>
+    <button type="button" data-tab="settings" data-i18n="ui.settings">Settings</button>
+   </div><span class="native-select page-tab-select"><select id="page-tab-select" aria-label="Select view" data-i18n-aria-label="ui.select_view"></select></span></div>
+   <div class="page-tab-tools">
+    <button id="privacy-mask" class="icon-action" type="button" aria-label="Privacy mask" data-i18n-aria-label="controls.privacy"></button>
+    <button type="button" class="icon-action" data-page-action="refresh" aria-label="Refresh" data-i18n-aria-label="ui.refresh"></button>
+   </div>
+  </nav>
+ </div>
+ <div id="admin-data-status" class="notice err" role="status"></div>
         <section id="tab-auth-files" class="hidden">
           <div class="card">
             <div class="row spread section-toolbar">
@@ -259,30 +73,14 @@
                     <input id="auth-enabled-only" type="checkbox" role="switch" checked />
                     <span data-i18n="ui.enabled_only">Enabled only</span>
                   </label>
-                  <label class="toggle-filter">
-                    <input id="auth-quota-estimate" type="checkbox" role="switch" />
-                    <span data-i18n="ui.quota_estimate">Quota estimate</span>
-                  </label>
                 </div>
-                <span class="native-select">
-                  <select id="auth-provider" aria-label="Filter by auth file category" data-i18n-aria-label="ui.filter_by_auth_file_category">
-                    <option value="" data-i18n="ui.all_categories">All categories</option>
-                    <option value="claude">Claude</option>
-                    <option value="antigravity">Antigravity</option>
-                    <option value="codex">Codex</option>
-                    <option value="xai">xAI</option>
-                    <option value="kimi">Kimi</option>
-                  </select>
-                </span>
                 <input id="auth-search" type="search" placeholder="Search auth files" autocomplete="off"  data-i18n-placeholder="ui.search_auth_files"/>
                 <button id="auth-refresh-filtered" class="labeled-icon-button" type="button" data-i18n="ui.update_quotas">Refresh quota</button>
               </div>
             </div>
             <div id="auth-files-body" class="credential-list"></div>
           </div>
-        </section>
-
-        <section id="tab-ai-providers" class="hidden">
+        </section>        <section id="tab-ai-providers" class="hidden">
           <div class="card">
             <div class="row spread section-toolbar">
               <h2 data-i18n="ui.ai_providers">AI Providers</h2>
@@ -293,20 +91,31 @@
                     <span data-i18n="ui.enabled_only">Enabled only</span>
                   </label>
                 </div>
-                <span class="native-select">
-                  <select id="ai-provider-type" aria-label="Filter by provider type" data-i18n-aria-label="ui.filter_by_ai_provider_type">
-                    <option value="" data-i18n="ui.all_types">All types</option>
-                  </select>
-                </span>
                 <input id="ai-provider-search" type="search" placeholder="Search AI providers" autocomplete="off"  data-i18n-placeholder="ui.search_ai_providers"/>
                 <button id="ai-provider-query-balances" class="labeled-icon-button" type="button" data-i18n="ui.query_balance">Query balance</button>
               </div>
             </div>
             <div id="ai-providers-body" class="credential-list"></div>
           </div>
-        </section>
-
-        <section id="tab-plugin-logs" class="hidden">
+        </section><section id="tab-errors" class="hidden"><div class="card">
+ <div class="row spread section-toolbar"><h2 data-i18n="ui.error_events">Error events</h2></div>
+ <div id="errors-body"></div><div class="row dialog-actions"><button id="errors-more" type="button" data-i18n="controls.load_more">Load more</button></div>
+ </div></section>        <section id="tab-concurrency" class="hidden">
+<form id="concurrency-form" class="card">
+<h2 data-i18n="concurrency.title">Concurrency policy</h2>
+<div class="concurrency-fields">
+<label class="field" for="concurrency-account_queue_capacity"><span data-i18n="concurrency.account_queue_capacity">Account queue capacity</span><span class="small muted" data-i18n="concurrency.account_queue_capacity_help">Maximum waiting requests per upstream account. 0 disables queuing.</span><input id="concurrency-account_queue_capacity" type="number" min="0" max="1000" step="1" value="0" required disabled /></label><label class="field" for="concurrency-queue_timeout_seconds"><span data-i18n="concurrency.queue_timeout_seconds">Queue timeout (seconds)</span><span class="small muted" data-i18n="concurrency.queue_timeout_seconds_help">Maximum wait from first enqueue, 1–120 seconds. Timeout returns HTTP 429.</span><input id="concurrency-queue_timeout_seconds" type="number" min="1" max="120" step="1" value="30" required disabled /></label></div><div id="concurrency-error" class="notice err" role="alert"></div><div class="row location-actions"><button id="concurrency-reload" type="button" data-i18n="location.reload">Reload settings</button><button id="concurrency-save" type="submit" class="primary" data-i18n="ui.save" disabled>Save</button></div></form></section><section id="tab-location" class="hidden">
+          <form id="location-form" class="card">
+            <h2 data-i18n="location.title">Request timezone override</h2>
+            <p class="muted small" data-i18n="location.description">Override timezone and location fields in Codex requests. Custom locations for account outbound proxies take precedence.</p>
+            <div id="location-editor-host"></div>
+            <div id="location-error" class="notice err" role="alert"></div>
+            <div class="row location-actions">
+              <button id="location-reload" type="button" data-i18n="location.reload">Reload settings</button>
+              <button id="location-save" type="submit" class="primary" data-i18n="ui.save" disabled>Save</button>
+            </div>
+          </form>
+        </section>        <section id="tab-plugin-logs" class="hidden">
           <div class="card event-list-card plugin-log-card">
             <div class="row spread section-toolbar">
               <h2 data-i18n="ui.plugin_logs">Plugin logs</h2>
@@ -314,7 +123,7 @@
                 <input id="plugin-log-filter" placeholder="Search loaded logs" class="wide-search"  data-i18n-placeholder="ui.search_loaded_logs"/>
                 <span class="native-select">
                   <select id="plugin-log-level" aria-label="Filter by level" data-i18n-aria-label="ui.filter_by_level">
-                    <option value="all" data-i18n="ui.all_levels">All levels</option>
+                    <option value="" data-i18n="ui.all_levels">All levels</option>
                     <option value="debug" data-i18n="ui.debug">Debug</option>
                     <option value="info" data-i18n="ui.info">Info</option>
                     <option value="error" data-i18n="ui.error">Error</option>
@@ -324,203 +133,10 @@
               </div>
             </div>
             <div id="plugin-logs-body" class="event-list-region"></div>
-            <div class="event-list-footer"><span id="plugin-log-note" class="muted small"></span></div>
+            <div class="event-list-footer"><button id="logs-more" type="button" data-i18n="controls.load_more">Load more</button></div>
           </div>
-        </section>
-      </main>
-
-      <main id="account-app" class="hidden">
-        <header class="head app-header">
-          <div class="app-title">
-            <h1><span data-lucide-icon="key" aria-hidden="true"></span><span data-i18n="ui.api_key_usage">API Key Usage</span></h1>
-            <span id="account-identity" class="muted mono mask-blur"></span>
-          </div>
-          <div class="standalone-actions" aria-label="Page actions" data-i18n-aria-label="ui.page_actions">
-            <button type="button" class="icon-action" data-page-action="theme" aria-label="Switch theme" data-i18n-aria-label="ui.switch_theme"></button>
-            <button type="button" class="icon-action" data-page-action="logout" aria-label="Sign out" data-i18n-aria-label="ui.sign_out"></button>
-          </div>
-        </header>
-        <div id="account-data-status" class="notice err" role="status"></div>
-        <section id="account-untracked" class="card account-empty hidden">
-          <h2 data-i18n="ui.no_billing_records_yet">No usage recorded yet</h2>
-          <p class="muted" data-i18n="ui.this_api_key_is_valid_but_the_plugin_has_not_received_any_attributable_usage_yet">This API key is valid. Usage will appear here after the plugin receives a usage record for it.</p>
-        </section>
-        <section id="account-content">
-          <div class="page-tabs-row">
-            <nav class="page-navigation" aria-label="API key views" data-i18n-aria-label="ui.api_key_views">
-              <div class="page-tab-switcher">
-                <div class="tabs">
-                  <button type="button" class="active" data-account-tab="subscription" data-i18n="ui.subscription">Subscription</button>
-                  <button type="button" data-account-tab="analysis" data-i18n="ui.analysis">Analysis</button>
-                  <button type="button" data-account-tab="request-events" data-i18n="ui.request_events">Request events</button>
-                  <button type="button" data-account-tab="errors" data-i18n="ui.error_events">Error events</button>
-                  <button type="button" data-account-tab="auth-files" data-i18n="ui.auth_files">Auth Files</button>
-                </div>
-                <span class="native-select page-tab-select">
-                  <select id="account-page-tab-select" aria-label="Select view" data-i18n-aria-label="ui.select_view"></select>
-                </span>
-              </div>
-              <div class="page-tab-tools">
-                <button
-                  id="account-privacy-mask"
-                  class="icon-action privacy-mask-button"
-                  type="button"
-                  aria-pressed="false"
-                  data-tip="Blur API keys, labels, and account emails"
-                  data-i18n-data-tip="ui.blur_api_keys_labels_and_account_emails"
-                ></button>
-                <button type="button" class="icon-action" data-page-action="refresh" aria-label="Refresh" data-i18n-aria-label="ui.refresh"></button>
-              </div>
-            </nav>
-            <div id="account-page-tab-actions" class="page-tab-actions hidden">
-              <div id="account-shared-time-filter" class="time-range-control hidden">
-                <button
-                  id="account-shared-time-trigger"
-                  class="time-range-trigger"
-                  type="button"
-                  aria-haspopup="dialog"
-                  aria-expanded="false"
-                >
-                  <span class="time-range-icon" data-lucide-icon="clock" aria-hidden="true"></span>
-                  <span id="account-shared-time-label" data-i18n="ui.last_30_days">Last 30 days</span>
-                  <span class="time-range-chevron" data-lucide-icon="chevron-down" aria-hidden="true"></span>
-                </button>
-                <div id="account-shared-time-popover" class="time-range-popover hidden" role="dialog" aria-label="Select time range" data-i18n-aria-label="ui.select_time_range"></div>
-              </div>
-              <span id="account-auto-refresh-control" class="native-select auto-refresh-control hidden">
-                <span class="native-select-icon" data-lucide-icon="timer" aria-hidden="true"></span>
-                <select id="account-auto-refresh" aria-label="Auto refresh interval" data-i18n-aria-label="ui.auto_refresh_interval"></select>
-              </span>
-              <button id="account-events-export" class="labeled-icon-button hidden" type="button" data-i18n="ui.export">Export</button>
-            </div>
-          </div>
-          <div id="account-shared-time-backdrop" class="time-range-backdrop hidden"></div>
-          <section id="account-tab-subscription">
-            <div class="stats account-subscription-stats">
-              <div class="card account-plan">
-                <div class="row spread">
-                  <h2 id="account-plan-name" data-i18n="ui.remaining_subscription_quota">Quota remaining</h2>
-                  <span id="account-plan-status" class="tag plain"></span>
-                </div>
-                <div id="account-windows"></div>
-              </div>
-              <div class="card account-plan">
-                <h2 data-i18n="ui.concurrency_limit">Concurrency limit</h2>
-                <b id="account-concurrency" class="account-plan-value">—</b>
-                <div class="muted small" data-i18n="ui.active_connections_concurrency_limit_for_this_api_key">In-flight requests&thinsp;/&thinsp;concurrency limit for this API key</div>
-              </div>
-            </div>
-            <div class="card" id="account-access-card"> <h2 data-i18n="ui.access_permissions">Access permissions</h2> <div id="account-access"></div> </div>
-            <div class="card"> <h2 data-i18n="ui.model_prices">Model prices</h2> <div id="account-models" class="account-models"></div> </div>
-          </section>
-          <section id="account-tab-analysis" class="hidden"><div id="account-analysis-body"></div></section>
-          <section id="account-tab-request-events" class="hidden">
-            <div class="card event-list-card">
-              <div class="row spread section-toolbar">
-                <h2 data-i18n="ui.request_events">Request events</h2>
-                <div class="row section-actions event-card-actions">
-                  <span class="native-select">
-                    <select id="account-request-event-model" aria-label="Filter by model" data-i18n-aria-label="ui.filter_by_model"> <option value="" data-i18n="ui.all_models">All models</option> </select>
-                  </span>
-                  <span class="native-select mask-select">
-                    <select id="account-request-event-source" aria-label="Filter by source" data-i18n-aria-label="ui.filter_by_source"> <option value="" data-i18n="ui.all_sources">All sources</option> </select>
-                  </span>
-                  <span class="native-select">
-                    <select id="account-request-event-status" aria-label="Filter by result" data-i18n-aria-label="ui.filter_by_result">
-                      <option value="" data-i18n="ui.all_results">All results</option>
-                      <option value="false" data-i18n="ui.succeeded">Succeeded</option>
-                      <option value="true" data-i18n="ui.failed">Failed</option>
-                    </select>
-                  </span>
-                  <button id="account-request-events-filter-clear" class="link" type="button" disabled data-i18n="ui.clear_filters">Clear filters</button>
-                </div>
-              </div>
-              <div id="account-request-events-body" class="event-list-region"></div>
-              <div class="event-list-footer"><span id="account-request-event-note" class="muted small"></span></div>
-            </div>
-          </section>
-          <section id="account-tab-errors" class="hidden">
-            <div class="card event-list-card">
-              <div class="row spread section-toolbar">
-                <h2 data-i18n="ui.error_events">Error events</h2>
-                <div class="row section-actions event-card-actions">
-                  <span class="native-select"> <select id="account-error-model"> <option value="" data-i18n="ui.all_models">All models</option> </select> </span>
-                  <span class="native-select mask-select"> <select id="account-error-source"> <option value="" data-i18n="ui.all_sources">All sources</option> </select> </span>
-                  <span class="native-select">
-                    <select id="account-error-type" aria-label="Filter by error type" data-i18n-aria-label="ui.filter_by_error_type"> <option value="" data-i18n="ui.all_error_types">All error types</option> </select>
-                  </span>
-                  <button id="account-errors-filter-clear" class="link" type="button" disabled data-i18n="ui.clear_filters">Clear filters</button>
-                </div>
-              </div>
-              <div id="account-errors-body" class="event-list-region"></div>
-              <div class="event-list-footer"><span id="account-error-note" class="muted small"></span></div>
-            </div>
-          </section>
-          <section id="account-tab-auth-files" class="hidden">
-            <div class="card">
-              <div class="row spread section-toolbar">
-                <h2 data-i18n="ui.auth_files">Auth Files</h2>
-                <div class="row section-actions credential-filter-bar">
-                  <div class="credential-filter-switches">
-                    <label class="toggle-filter">
-                      <input id="account-auth-enabled-only" type="checkbox" role="switch" checked />
-                      <span data-i18n="ui.enabled_only">Enabled only</span>
-                    </label>
-                  </div>
-                  <span class="native-select">
-                    <select id="account-auth-provider" aria-label="Filter by auth file category" data-i18n-aria-label="ui.filter_by_auth_file_category">
-                      <option value="" data-i18n="ui.all_categories">All categories</option>
-                      <option value="claude">Claude</option>
-                      <option value="antigravity">Antigravity</option>
-                      <option value="codex">Codex</option>
-                      <option value="xai">xAI</option>
-                      <option value="kimi">Kimi</option>
-                    </select>
-                  </span>
-                  <input id="account-auth-search" type="search" placeholder="Search auth files" autocomplete="off"  data-i18n-placeholder="ui.search_auth_files"/>
-                  <button id="account-auth-refresh-filtered" class="labeled-icon-button" type="button" data-i18n="ui.update_quotas">Refresh quota</button>
-                </div>
-              </div>
-              <div id="account-auth-files-body" class="credential-list"></div>
-            </div>
-          </section>
-        </section>
-      </main>
-    </div>
-    <footer class="page-footer">
-      <span>© 2026 <a href="https://github.com/haowang02/cpa-plugin-key-billing" target="_blank" rel="noopener noreferrer">CPA Key Billing</a></span>
-      <span>&thinsp;·&thinsp;<a href="https://github.com/haowang02/cpa-plugin-key-billing/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" data-i18n="ui.license">License</a></span>
-      <span>&thinsp;·&thinsp;<span data-i18n="ui.version">Version</span>: v1.4.2</span>
-    </footer>
-
-    <div id="notice" class="notice" popover="manual"></div>
-
-    <dialog id="price-dialog" class="settings-dialog">
-      <h2 id="price-dialog-title" data-i18n="ui.edit_model_pricing">Edit model pricing</h2>
-      <div class="editor-state notice hidden"></div>
-      <label class="field"> <span data-i18n="ui.model_id">Model ID</span> <input class="mono price-dialog-model" id="price-model" placeholder="Model ID" maxlength="1024"  data-i18n-placeholder="ui.model_id"/> </label>
-      <div class="price-reference">
-        <label class="field"> <span data-i18n="ui.choose_reference_price">Use reference price</span> <input id="price-reference-search" placeholder="Search reference models" autocomplete="off"  data-i18n-placeholder="ui.search_reference_models"/> </label>
-        <div id="price-reference-results" class="price-reference-results" aria-live="polite"></div>
-      </div>
-      <div class="price-fields">
-        <label class="field"> <span data-i18n="ui.input_1m_tokens">Input&thinsp;/&thinsp;1M tokens</span> <input id="price-in" type="number" step="any" min="0" value="0" /> </label>
-        <label class="field"> <span data-i18n="ui.output_1m_tokens">Output&thinsp;/&thinsp;1M tokens</span> <input id="price-out" type="number" step="any" min="0" value="0" /> </label>
-        <label class="field"> <span data-i18n="ui.cache_read_1m_tokens">Cache read&thinsp;/&thinsp;1M tokens</span> <input id="price-cr" type="number" step="any" min="0" /> </label>
-        <label class="field"> <span data-i18n="ui.cache_write_1m_tokens">Cache write&thinsp;/&thinsp;1M tokens</span> <input id="price-cw" type="number" step="any" min="0" /> </label>
-      </div>
-      <label class="switch-field"> <input id="price-tiered" type="checkbox" /> <span data-i18n="ui.enable_long_context_tiered_pricing">Enable long-context tiered pricing</span> </label>
-      <div id="price-tier-fields" class="price-fields tier-fields hidden">
-        <label class="field"> <span data-i18n="ui.long_context_threshold_input_tokens">Long-context threshold (input tokens)</span> <input id="price-tier-threshold" type="number" step="1" min="1" value="272000" /> </label>
-        <span></span>
-        <label class="field"> <span data-i18n="ui.long_context_input_1m_tokens">Long-context input&thinsp;/&thinsp;1M tokens</span> <input id="price-tier-in" type="number" step="any" min="0" value="0" /> </label>
-        <label class="field"> <span data-i18n="ui.long_context_output_1m_tokens">Long-context output&thinsp;/&thinsp;1M tokens</span> <input id="price-tier-out" type="number" step="any" min="0" value="0" /> </label>
-        <label class="field"> <span data-i18n="ui.long_context_cache_read_1m_tokens">Long-context cache read&thinsp;/&thinsp;1M tokens</span> <input id="price-tier-cr" type="number" step="any" min="0" /> </label>
-        <label class="field"> <span data-i18n="ui.long_context_cache_write_1m_tokens">Long-context cache write&thinsp;/&thinsp;1M tokens</span> <input id="price-tier-cw" type="number" step="any" min="0" /> </label>
-      </div>
-      <div class="row dialog-actions"> <button id="price-cancel" data-i18n="ui.cancel">Cancel</button> <button id="price-save" class="primary" data-i18n="ui.save">Save</button> </div>
-    </dialog>
-
+        </section></main><footer class="footer"><span data-i18n="controls.title">Account Controls</span>: v1.4.2-timezone.14</footer></div>
+ <div id="notice" class="notice" popover="manual" role="status"></div>
     <dialog id="action-dialog">
       <h2 id="action-dialog-title"></h2>
       <div class="editor-state notice hidden"></div>
@@ -528,74 +144,20 @@
       <input id="action-input" class="dialog-input" />
       <div class="row dialog-actions"> <button id="action-cancel" data-i18n="ui.cancel">Cancel</button> <button id="action-confirm" class="primary" data-i18n="ui.confirm">Confirm</button> </div>
     </dialog>
-
-    <dialog id="auth-drawer" class="drawer" aria-labelledby="auth-drawer-title">
-      <header class="drawer-header">
-        <div id="auth-drawer-identity" class="drawer-identity"></div>
-        <button id="auth-drawer-close" type="button" class="labeled-icon-button round-icon-button" aria-label="Close" data-i18n-aria-label="ui.close"></button>
-      </header>
-      <div class="drawer-body">
-        <section class="drawer-section" aria-labelledby="auth-drawer-usage-title">
-          <h3 id="auth-drawer-usage-title" data-i18n="ui.last_30_days_usage">Usage in the last 30 days</h3>
-          <div id="auth-drawer-usage"></div>
-          <div id="auth-drawer-models" class="table-scroll inset-card drawer-table"></div>
-        </section>
-        <section id="auth-drawer-reset-section" class="drawer-section" aria-labelledby="auth-drawer-reset-title">
-          <div class="drawer-section-head">
-            <h3 id="auth-drawer-reset-title"><span data-i18n="ui.manual_resets">Manual resets</span><span id="auth-drawer-reset-count" class="auth-reset-count-badge"></span></h3>
-            <button id="auth-drawer-reset" type="button" class="labeled-icon-button"></button>
-          </div>
-          <div id="auth-drawer-resets"></div>
-        </section>
-        <section class="drawer-section" aria-labelledby="auth-drawer-windows-title">
-          <h3 id="auth-drawer-windows-title" data-i18n="ui.quota_windows">Quota windows</h3>
-          <div id="auth-drawer-window-switch" class="segmented-control" role="tablist" aria-labelledby="auth-drawer-windows-title"></div>
-          <div id="auth-drawer-periods" role="tabpanel" aria-labelledby="auth-drawer-windows-title"></div>
-        </section>
-      </div>
-    </dialog>
-
-    <div id="hover-tooltip" class="hover-tooltip" popover="manual" role="tooltip" tabindex="0"></div>
-
-    <dialog id="route-picker" class="settings-dialog route-picker" aria-labelledby="route-picker-title" aria-describedby="route-picker-identity">
-      <h2 id="route-picker-title" data-i18n="ui.edit_api_key_routing_rules">Edit API key routing rules</h2>
-      <p id="route-picker-identity" class="route-picker-identity mask-blur"></p>
-      <div id="route-picker-notice" class="editor-state notice hidden"></div>
-      <div class="route-form-toolbar">
-        <input id="route-picker-search" type="search" placeholder="Search routing rules, upstream credentials, or models" aria-label="Search routing rules, upstream credentials, or models" autocomplete="off"  data-i18n-placeholder="ui.search_routing_rules_upstream_credentials_or_models" data-i18n-aria-label="ui.search_routing_rules_upstream_credentials_or_models"/>
-        <div class="row compact-actions">
-          <button id="route-picker-all" class="link" type="button" data-tip="Assign matching routing rules and allow matching models and credentials" data-i18n="ui.allow_all" data-i18n-data-tip="ui.bind_filtered_routing_rules_and_allow_filtered_models_and_credentials">Allow all</button>
-          <button id="route-picker-deny-all" class="link" type="button" data-tip="Assign matching routing rules and deny matching models and credentials" data-i18n="ui.deny_all" data-i18n-data-tip="ui.bind_filtered_routing_rules_and_deny_filtered_models_and_credentials">Deny all</button>
-          <button id="route-picker-clear" class="link" type="button" data-i18n="ui.clear">Clear</button>
-        </div>
-      </div>
-      <div id="route-picker-list" class="routing-list"></div>
-      <div class="row dialog-actions">
-        <button id="route-picker-cancel" data-i18n="ui.cancel">Cancel</button>
-        <button id="route-picker-save" class="primary" data-i18n="ui.save">Save</button>
-      </div>
-    </dialog>
-
-    <script>
-      "use strict";
-      // The application files run in this order as one script, so declarations are shared and hoisted across them.
-      /*core.js*/
-      /*format.js*/
-      /*components.js*/
-      /*data.js*/
-      /*time-range.js*/
-      /*credentials.js*/
-      /*keys.js*/
-      /*routing.js*/
-      /*plans.js*/
-      /*prices.js*/
-      /*analysis.js*/
-      /*events.js*/
-      /*logs.js*/
-      /*auth-files.js*/
-      /*ai-providers.js*/
-      /*account.js*/
-      /*app.js*/
-    </script>
-  </body>
-</html>
+<div id="hover-tooltip" class="hover-tooltip" popover="manual" role="tooltip" tabindex="0"></div>
+<script>
+  "use strict";
+  /*zoned-time.js*/
+  /*core.js*/
+  /*format.js*/
+  /*components.js*/
+  /*data.js*/
+  /*credentials.js*/
+  /*auth-files.js*/
+  /*ai-providers.js*/
+  /*diagnostics.js*/
+  /*credential-policies.js*/
+  /*location-settings.js*/
+  /*concurrency-settings.js*/
+  /*app.js*/
+</script></body></html>

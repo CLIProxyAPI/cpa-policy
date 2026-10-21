@@ -1,6 +1,4 @@
-const PLUGIN_BASE = "/v0/management/plugins/cpa-key-billing";
-const ACCOUNT_BASE = "/v0/resource/plugins/cpa-key-billing";
-const CALLER_SCOPE_SALT = "cli-proxy-api:caller-scope:v1\u0000";
+const PLUGIN_BASE = "/v0/management/plugins/cpa-codex-controls";
 const DISPLAY_SEPARATOR = "\u2009·\u2009";
 const DISPLAY_SLASH = "\u2009/\u2009";
 const $ = (id) => document.getElementById(id);
@@ -10,11 +8,11 @@ window.billingI18n.initialize();
 
 /* A same-origin iframe can borrow the panel's obfuscated management key. When
  * it is unavailable, the standalone login can use its own encrypted vault. */
-const CREDENTIAL_DB = "cpa-key-billing-credentials";
+const CREDENTIAL_DB = "cpa-codex-controls-credentials";
 const CREDENTIAL_STORE = "vault";
 const CREDENTIAL_KEY = "wrapping-key";
-const SESSION_CREDENTIAL_PREFIX = "cpa-key-billing.session.v1.";
-const VIEW_PREFERENCE_PREFIX = "cpa-key-billing.view.v1.";
+const SESSION_CREDENTIAL_PREFIX = "cpa-codex-controls.session.v1.";
+const VIEW_PREFERENCE_PREFIX = "cpa-codex-controls.view.v1.";
 
 function readPanelKey() {
   const fromStore = panelStoredValue("cli-proxy-auth")?.state?.managementKey;
@@ -28,15 +26,13 @@ function readPanelKey() {
 
 const embedded = window.parent !== window;
 document.body.classList.toggle("embedded", embedded);
-const ADMIN_TAB_IDS = ["keys", "analysis", "request-events", "errors", "auth-files", "ai-providers", "settings"];
-const ACCOUNT_TAB_IDS = ["subscription", "analysis", "request-events", "errors", "auth-files"];
-const PAGE_ROUTE_KEY = "cpa-key-billing.route.v1." + (embedded ? "embedded" : "standalone");
+const ADMIN_TAB_IDS = ["auth-files", "ai-providers", "errors", "settings"];
+const PAGE_ROUTE_KEY = "cpa-codex-controls.route.v1." + (embedded ? "embedded" : "standalone");
 
 function parsePageRoute(value) {
   const [role, tab] = value.split("/");
-  if (role === "account") return { role, tab: ACCOUNT_TAB_IDS.includes(tab) ? tab : "subscription" };
-  if (role === "admin") return { role, tab: ADMIN_TAB_IDS.includes(tab) ? tab : "keys" };
-  return null;
+  if (role !== "admin") return null;
+  return { role: "admin", tab: ADMIN_TAB_IDS.includes(tab) ? tab : "auth-files" };
 }
 
 function pageRoute() {
@@ -46,7 +42,7 @@ function pageRoute() {
     const stored = parsePageRoute(sessionStorage.getItem(PAGE_ROUTE_KEY) || "");
     if (stored) return stored;
   } catch (_) {}
-  return { role: "admin", tab: "keys" };
+  return { role: "admin", tab: "auth-files" };
 }
 
 function writePageRoute(role, tab) {
@@ -69,7 +65,6 @@ function emptyAuthQuotaState() {
 function emptyAdminUIState() {
   return {
     ...emptyAuthQuotaState(),
-    keySubmissions: new Set(),
     authStatusSubmissions: new Map(),
     aiBalances: new Map(),
     aiBalanceLoading: new Set(),
@@ -77,10 +72,8 @@ function emptyAdminUIState() {
   };
 }
 let adminUIState = emptyAdminUIState();
-let accountUIState = emptyAuthQuotaState();
-const authQuotaGeneration = { admin: 0, account: 0 };
-const credentialScope = { admin: "", account: "" };
-let accountTab = initialRoute.role === "account" ? initialRoute.tab : "subscription";
+const authQuotaGeneration = { admin: 0 };
+const credentialScope = { admin: "" };
 
 function openCredentialDB() {
   return new Promise((resolve, reject) => {
@@ -185,9 +178,7 @@ async function api(method, path, body, opts) {
     const fallback = messageText && !/<[^>]+>/.test(messageText) ? messageText.slice(0, 200) + (messageText.length > 200 ? "…" : "") : "";
     const message = window.billingI18n.serverMessage(payload?.error, fallback);
     if ((resp.status === 401 || (resp.status === 403 && !opts?.keepSessionOnForbidden)) && !opts?.auxiliaryCredential) {
-      throw new AuthError(
-        message || (currentRole === "account" ? m("ui.invalid_api_key_or_access_denied") : m("ui.invalid_management_key_or_access_denied"))
-      );
+      throw new AuthError(message || m("ui.invalid_management_key_or_access_denied"));
     }
     const error = new UIError(
       message ||
@@ -202,7 +193,6 @@ async function api(method, path, body, opts) {
 }
 
 const plugin = (method, path, body, opts) => api(method, PLUGIN_BASE + path, body, opts);
-const accountAPI = (path, opts) => api("GET", ACCOUNT_BASE + path, null, opts);
 
 function requireObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new UIError(m("ui.invalid_response_for_value", { v0: label }));

@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const storageKey = "cpa-key-billing:language";
+  const storageKey = "cpa-codex-controls:language";
   const LANGUAGES = [["zh-CN", "简体中文"], ["en", "English"]];
   const embedded = window.parent !== window;
   const bindings = new WeakMap();
@@ -29,7 +29,7 @@
 
   class DateMessage extends Message {
     constructor(value, options) { super(""); this.value = value; this.options = options; }
-    toString() { return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", this.options).format(new Date(this.value)); }
+    toString() { return new Intl.DateTimeFormat(language === "en" ? "en-US" : "zh-CN", (window.billingTime?.options(this.options) || this.options)).format(new Date(this.value)); }
   }
 
   const message = (key, params) => new Message(key, params);

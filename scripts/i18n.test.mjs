@@ -39,7 +39,7 @@ test("visible HTML copy is localized, with English fallbacks matching the catalo
     }
     if (node.nodeName === "#text" && /[a-zA-Z]/.test(node.value) && !translated) {
       const text = node.value.trim();
-      assert.ok(technicalLabels.has(text) || /^:\s*v\d+\.\d+\.\d+$/.test(text), `Untranslated HTML text: ${text}`);
+      assert.ok(technicalLabels.has(text) || /^:\s*v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(text), `Untranslated HTML text: ${text}`);
     }
     for (const attr of ["title", "aria-label", "placeholder"]) {
       if (!attrs[attr]) continue;
@@ -81,7 +81,7 @@ test("inlined scripts parse as the browser receives them", () => {
 function environment(stored, hostLanguage, { crossOrigin = false, search = "", catalogs = { en, "zh-CN": zh } } = {}) {
   const listeners = {}, root = { lang: "" };
   const document = { documentElement: root, createTreeWalker: () => ({ currentNode: root, nextNode: () => false }), querySelectorAll: () => [] };
-  const storage = new Map(stored ? [["cpa-key-billing:language", stored]] : []);
+  const storage = new Map(stored ? [["cpa-codex-controls:language", stored]] : []);
   const window = { addEventListener: (name, fn) => { listeners[name] = fn; }, dispatchEvent: () => {} };
   window.parent = hostLanguage ? { document: { documentElement: { lang: hostLanguage } } } : window;
   const posted = [];
@@ -95,7 +95,7 @@ function environment(stored, hostLanguage, { crossOrigin = false, search = "", c
     BILLING_MESSAGES: catalogs });
   vm.runInContext(runtime, context);
   return { i18n: window.billingI18n, window, listeners, posted, storage, evaluate: source => vm.runInContext(source, context), change: (language) => {
-    storage.set("cpa-key-billing:language", language); listeners.storage({ key: "cpa-key-billing:language" });
+    storage.set("cpa-codex-controls:language", language); listeners.storage({ key: "cpa-codex-controls:language" });
   } };
 }
 
@@ -111,11 +111,11 @@ test("English defaults, stored preference, and host precedence", () => {
 test("cached messages and nested parameters translate without changing user data", () => {
   const { i18n, change } = environment();
   const userLabel = "<img src=x onerror=alert(1)> 自定义";
-  const value = i18n.message("ui.failed_to_load_value_value", { v0: i18n.message("ui.subscription_plans"), v1: userLabel });
-  assert.equal(String(value), `Subscription plans could not be loaded: ${userLabel}`);
+  const value = i18n.message("ui.join", { v0: i18n.message("ui.auth_files"), v1: ": ", v2: userLabel });
+  assert.equal(String(value), `Auth Files: ${userLabel}`);
   const error = new i18n.UIError(value);
   change("zh-CN");
-  assert.equal(String(error.message), `订阅计划加载失败：${userLabel}`);
+  assert.equal(String(error.message), `认证文件: ${userLabel}`);
   assert.equal(i18n.serverMessage({ message_key: "unknown" }, "raw upstream text"), "raw upstream text");
   assert.equal(i18n.chartValue(value), String(value));
 });
@@ -164,8 +164,6 @@ test("English durations use singular and plural forms", () => {
   assert.equal(String(i18n.message("time.duration_day", { count: 1 })), "1 day");
   assert.equal(String(i18n.message("time.duration_day", { count: 2 })), "2 days");
   assert.equal(String(i18n.message("time.last_hour", { count: 1 })), "Last 1 hour");
-  assert.equal(String(i18n.message("quota.request_count", { count: 1, value: "1" })), "1 request");
-  assert.equal(String(i18n.message("quota.request_count", { count: 1000, value: "1,000" })), "1,000 requests");
   change("zh-CN");
   assert.equal(String(i18n.message("time.duration_day", { count: 1 })), "1 天");
 });
@@ -193,7 +191,7 @@ test("cross-origin language messages require the expected parent, origin, and ve
   assert.equal(env.i18n.current(), "en");
   env.listeners.message({ ...valid, data: { ...valid.data, language: "zh-TW" } });
   assert.equal(env.i18n.current(), "zh-CN");
-  assert.equal(env.storage.get("cpa-key-billing:language"), "en", "host language must not overwrite the standalone preference");
+  assert.equal(env.storage.get("cpa-codex-controls:language"), "en", "host language must not overwrite the standalone preference");
   assert.equal(environment(undefined, undefined, { crossOrigin: true, search: "?parent_origin=data%3Atext%2Fhtml%2C" }).listeners.message, undefined);
 });
 

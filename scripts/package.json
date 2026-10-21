@@ -1,12 +1,14 @@
 {
-  "name": "cpa-key-billing-dev-scripts",
+  "name": "cpa-codex-controls-dev-scripts",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "format:ui": "node format_ui.mjs",
     "check:ui": "node format_ui.mjs --check",
-    "test": "node --test format_ui.test.mjs i18n.test.mjs"
+    "test": "node --test format_ui.test.mjs i18n.test.mjs zoned-time.test.mjs"
   },
   "devDependencies": {
     "@babel/parser": "7.28.5",

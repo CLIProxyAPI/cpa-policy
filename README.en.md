@@ -1,184 +1,51 @@
-<div align="center">
-  <h1>CPA Key Billing</h1>
-  <p><strong>Per-key billing, subscription quotas, and routing for <a href="https://github.com/router-for-me/CLIProxyAPI">CLIProxyAPI</a>.</strong></p>
-  <p>
-    <a href="https://github.com/haowang02/cpa-plugin-key-billing/releases/latest"><img src="https://img.shields.io/github/v/release/haowang02/cpa-plugin-key-billing?label=release" alt="Latest release"></a>
-    <a href="https://github.com/haowang02/cpa-plugin-key-billing/actions/workflows/check.yml"><img src="https://github.com/haowang02/cpa-plugin-key-billing/actions/workflows/check.yml/badge.svg" alt="CI status"></a>
-    <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platforms: Windows, macOS, and Linux">
-    <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
-  </p>
-  <p><strong>English</strong> · <a href="./README.md">简体中文</a></p>
-</div>
-<img src="images/example.png" alt="CPA Key Billing dashboard" width="100%" />
+# CPA Policy
 
-## Features
+Source and release assets are hosted in [CLIProxyAPI/cpa-policy](https://github.com/CLIProxyAPI/cpa-policy); the separate store registry is in [CLIProxyAPI/Plugins-Store](https://github.com/CLIProxyAPI/Plugins-Store).
 
-- Set spending, token, and request quotas for each API key, with independent or shared reset schedules.
-- Apply separate rates to requests that exceed a long-context input threshold.
-- Limit concurrent requests per API key.
-- Control access to models and upstream credentials with routing rules.
-- Use model reference prices from [models.dev](https://models.dev/), with optional custom overrides.
+A customized fork of `haowang02/cpa-plugin-key-billing` 1.4.2, version **1.4.2-timezone.14**. The independent plugin ID is now **`cpa-codex-controls`**; the management menu remains **Account Controls**.
 
-## How it works
+Removed: downstream API Key management/self-service, analytics, request events, subscription plans, routing rules, model pricing, and their backend/frontend/storage implementations. Plugin billing, subscription enforcement, price downloads, and scheduler hooks are gone. CPA still owns its access authentication and upstream credentials.
 
-Before a request reaches an upstream provider, the plugin checks subscription quotas, concurrency, and routing. After execution, CLIProxyAPI supplies usage through `usage.handle`. The plugin uses that record to store the request event, calculate its cost, and update spending for the current quota window.
+Retained:
 
-```mermaid
----
-config:
-  themeVariables:
-    fontSize: "13px"
-  flowchart:
-    diagramPadding: 4
-    nodeSpacing: 20
-    rankSpacing: 28
-    padding: 3
----
-flowchart TB
-    A[Client request] --> B["request.intercept_before<br/>Model · concurrency · quota"]
-    B -- Rejected --> R[HTTP 403 / 429]
-    B -- Admitted, slot reserved --> C["scheduler.pick<br/>Select an allowed credential"]
-    C -- No available match --> S[HTTP 503]
-    C -- Selected --> D["CLIProxyAPI calls<br/>the upstream provider"]
-    D --> E["request.complete<br/>Release the concurrency slot"]
-    D --> F["usage.handle<br/>Record the request and usage"]
-    F --> G["Normalize tokens and bill<br/>Update quota-window spending"]
+- Codex-only Auth Files and AI Providers (`codex-api-key`), with search, enabled-only filtering, native quota/balance queries, and per-row settings.
+- Per-account concurrency limits default to 0, bypassing limits and queuing. Positive limits use the global per-account queue capacity and timeout. Queue capacity 0 rejects excess requests immediately. Streaming slots last until completion; upstream provider keys have independent limits.
+- Opt-in location/timezone overrides. Individual account settings take precedence over the global default; explicit account-off preserves the original request. Detection fills country, region, city, and timezone through the account's configured proxy.
+- Upstream error events and plugin logs in an independent SQLite store.
+- Management-key login, English/Chinese, themes, privacy masks, and responsive layouts.
+
+## Installation and configuration
+
+Add this source in the CPA plugin store:
+
+```text
+https://raw.githubusercontent.com/CLIProxyAPI/Plugins-Store/main/registry.json
 ```
 
-## Requirements
+See [INSTALL.md](INSTALL.md) for installation and migration, and [TIMEZONE.md](TIMEZONE.md) for configuration, behavior, and limitations. Multi-provider support, prohibited-content detection, and request privacy filtering are not included in this version.
 
-- CLIProxyAPI **7.3.7 or later**.
-- A CLIProxyAPI build with plugin support. Builds labeled `no-plugin` cannot load this plugin.
-
-## Installation
-
-Run the installer from your CLIProxyAPI directory.
-
-On macOS or Linux:
+Requires a plugin-enabled CPA supporting schema 6; local validation uses CPA 7.3.7. Build with Go 1.24+ and a C compiler:
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/haowang02/cpa-plugin-key-billing/main/install.sh | sh
+CGO_ENABLED=1 go build -buildvcs=false -trimpath -ldflags='-s -w -X cpa-codex-controls/internal/plugin.GitHubRepository=https://github.com/CLIProxyAPI/cpa-policy' \
+  -tags cshared -buildmode=c-shared \
+  -o dist/cpa-codex-controls.so ./cmd/cpa-codex-controls
 ```
 
-On Windows, stop CLIProxyAPI first, then run this in PowerShell:
+Use `.dylib` on macOS. Stop CPA, put the library in `plugins.dir`, enable `plugins.configs.cpa-codex-controls.enabled`, and restart. Keep one loadable library per ID. See [INSTALL.md](INSTALL.md) for custom stores and migration from the old custom build.
 
-```powershell
-irm https://raw.githubusercontent.com/haowang02/cpa-plugin-key-billing/main/install.ps1 | iex
-```
+Use `CPA_PLUGIN_REPOSITORY=CLIProxyAPI/cpa-policy sh install.sh` to download ZIP assets and checksums from this repository. The verified .14 binaries retain their build-time repository metadata placeholder; the store uses the actual download URLs in the registry. Future GitHub Release builds inject the actual repository. Upstream links remain attribution only.
 
-The installer places the plugin in `plugins/` under the current directory. Restart CLIProxyAPI after installing or upgrading.
+## Diagnostic history
 
-For manual installation, download the archive for your platform from [Releases](https://github.com/haowang02/cpa-plugin-key-billing/releases/latest), then extract the library into CLIProxyAPI’s `plugins/` directory:
+`state_file` is now only a read-only source for importing old error events and plugin logs. The source defaults to empty, so independent installs do not read another plugin's data. Explicitly set it to the original billing database to import history. The separate destination `diagnostics_file` defaults to `plugins/cpa-codex-controls-diagnostics.db`.
 
-```text
-plugins/cpa-key-billing.so       # Linux
-plugins/cpa-key-billing.dylib    # macOS
-plugins/cpa-key-billing.dll      # Windows
-```
+Import is transactional and recorded once per source path, so restarts and clearing logs do not duplicate or resurrect records. The old database is unchanged. Keys, plans, pricing, routing, and successful request events are not copied. Incompatible diagnostic schemas fail with rollback. The new store retains diagnostics for 30 days; the original archive remains intact. Source and destination must be different databases.
 
-## Configuration
+Known retired YAML settings are tolerated but ignored. Copy existing `custom_location`, `concurrency`, and `credential_policies` into the new ID's configuration to retain settings. The old ID's configuration is not loaded automatically. For timezone.13 diagnostic continuity, explicitly reuse its `diagnostics_file` after disabling the old custom plugin; do not use its diagnostics database as a `state_file` import source. Timezone rewriting covers structured Codex/Responses contexts and search-tool locations; it does not change host/OS or other plugins' clocks, nor guarantee final precedence over later interceptors.
 
-Add the following to your CLIProxyAPI configuration:
+## Verification
 
-```yaml
-plugins:
-  enabled: true
-  dir: "plugins"
-  configs:
-    cpa-key-billing:
-      enabled: true
-      priority: 100 # Plugin scheduling priority; higher values take precedence
-      debug: false # Include routing and reference-price matching in debug logs
-      codex_fast_mode_billing: false # Charge 2.5× for Codex priority requests
-      mask_api_key_view_emails: false # Mask email addresses in API key account views
-      allow_api_key_quota_reset: false # Allow API key users to reset accessible Codex and Claude auth file quotas using upstream resets
-      state_file: "plugins/cpa-key-billing-state-v1.db"
-      routing:
-        strategy: "round-robin" # round-robin, weighted-round-robin, fill-first
-        session-affinity: false # Reuse an available upstream credential for the same session
-        session-affinity-ttl: "1h" # Idle timeout for session bindings
-```
+Run `gofmt -l .`, `go vet ./...`, `go test -race ./...`, `go mod tidy -diff`, `npm test --prefix scripts`, and `node scripts/format_ui.mjs --check`. Use `scripts/frontend_dummy_backend.py --port 18766` with management key `demo-management-key` for a memory-only UI demo. `scripts/e2e_proxy_location.py --cpa /path/to/cli-proxy-api --plugin /path/to/library` exercises a real local CPA with dummy upstreams.
 
-For requests with upstream credential restrictions, the plugin selects from the allowed credentials using the `routing` configuration above. Requests without upstream credential restrictions are handed to CPA for scheduling. The plugin's scheduling configuration is independent of CPA's global `routing` configuration.
-
-CPA selects one scheduling plugin by priority rather than calling them in sequence. Set `priority: 100` to give this plugin precedence; omitting it uses CPA's default of `0`. The selected credential must satisfy the API key's routing rules regardless of which scheduler selected it. Requests return `503` if the credential violates those rules or its permissions cannot be verified, with the reason recorded in the plugin logs.
-
-For initial selections or invalid session bindings, the plugin uses the highest available priority tier, then applies the selected strategy. With session affinity enabled, the same session reuses its bound credential while it remains available. Bindings expire after the idle period specified by `session-affinity-ttl`. Affinity requires a session identity supplied by CPA; requests without one follow the selected strategy.
-
-> [!WARNING]
-> Back up your data file before upgrading.
->
-> - Databases created by v1.0.0 or later are migrated automatically.
-> - JSON and SQLite files from v0.8.4 or earlier cannot be migrated. Point `state_file` to a new file instead.
-
-Restart CLIProxyAPI and open **API Key Billing** in the management panel. Review model pricing, create subscription plans, and bind the API keys whose quotas you want to enforce.
-
-## Access
-
-Administrators can open the plugin from the management panel or visit it directly:
-
-```text
-http(s)://<CLIProxyAPI address>/v0/resource/plugins/cpa-key-billing/ui
-```
-
-API key holders can use their own key to view their subscription and usage:
-
-```text
-http(s)://<CLIProxyAPI address>/v0/resource/plugins/cpa-key-billing/ui#account
-```
-
-## Billing and quotas
-
-- Keys without a subscription plan still have their usage recorded, but have no subscription quota limit.
-- A plan can contain multiple quota windows. Each window can limit spending in USD, tokens, requests, or any combination of the three.
-- Usage is tracked separately for each key, even when keys share a plan. Independent cycles start when the first request is admitted. Shared cycles use the configured schedule for every bound key.
-- A manual quota reset keeps shared reset times unchanged. Independent cycles restart when the next request is admitted.
-- Custom model prices take precedence over models.dev reference prices. Requests are rejected if neither is available.
-- Request events are retained for 365 days.
-
-## Routing rules
-
-Bind routing rules on the API key page, or set model and credential permissions directly on a key. Each selection cycles through three states: unselected, allowed (check mark), and denied (cross).
-
-A credential-category selection covers all credentials in that category, including credentials added later. You can deny individual credentials within an allowed category.
-
-The plugin combines all bound rules with the key’s direct selections. Model and credential permissions are evaluated separately: allowlists are combined, denylists are combined, and denials take precedence. An empty allowlist permits everything that is not explicitly denied.
-
-```mermaid
----
-config:
-  themeVariables:
-    fontSize: "13px"
-  flowchart:
-    diagramPadding: 4
-    nodeSpacing: 20
-    rankSpacing: 28
-    padding: 3
----
-flowchart TB
-    A["Bound rules<br/>+ direct key selections"] --> M["Combine model allowlists and denylists<br/>Empty allowlist: allow all, then apply denials"]
-    A --> C["Combine credential allowlists and denylists<br/>Categories + individual credentials<br/>Empty allowlist: allow all, then apply denials"]
-    M --> D{Is the model allowed?}
-    D -- No --> R[HTTP 403]
-    D -- Yes --> P["Select from available CPA credentials<br/>using credential permissions"]
-    C --> P
-    P -- Match --> U[Call the upstream provider]
-    P -- No match --> S[HTTP 503]
-```
-
-## Rejection responses
-
-| Condition | HTTP status | `type` | `code` |
-| --- | --- | --- | --- |
-| Concurrency limit reached | `429` | `rate_limit_error` | `rate_limit_exceeded` |
-| Subscription quota exhausted | `429` | `rate_limit_error` | `rate_limit_exceeded` |
-| Model access denied | `403` | `permission_error` | `insufficient_quota` |
-| No available credential matches the routing rules | `503` | `server_error` | `internal_server_error` |
-| The selected credential violates the routing rules | `503` | `server_error` | `routing_credential_mismatch` |
-| The selected credential's routing permissions cannot be verified | `503` | `server_error` | `routing_credential_unverified` |
-| A bound routing rule is missing or invalid | `503` | `server_error` | `routing_configuration_error` |
-| Model has no price | `503` | `cpa_key_billing_error` | `model_price_error` |
-
-## Acknowledgments
-
-- [LINUX DO](https://linux.do/) community.
+See [NOTICE](NOTICE) and `licenses/` for attribution and licenses.

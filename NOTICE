@@ -1,0 +1,26 @@
+CPA Key Billing — custom timezone/location extension
+
+This work retains cpa-plugin-key-billing by Hao Wang, originally licensed
+under the MIT License in LICENSE, at commit
+4e405bd1d953cdc477cdbdd0d4890bec3b58abc3.
+Source: https://github.com/haowang02/cpa-plugin-key-billing
+
+The structured context matching and request-location alignment design in
+internal/location/rewrite.go is adapted into Go from codex-proxy-rs:
+backend/crates/providers/openai/src/transport/request.rs, commit
+60570883007febebe732597a9881397098d724f5.
+Source: https://github.com/zyycn/codex-proxy-rs
+The original project is licensed under Apache License 2.0; the license is
+reproduced in licenses/codex-proxy-rs-APACHE-2.0.txt. The adaptation uses Go
+XML parsing and byte-preserving JSON field updates and adds conservative
+message-type and malformed-metadata checks.
+
+Modified files include location validation/normalization, per-credential
+concurrency controls, timezone display, plugin registration and management
+endpoints, independent diagnostics with read-only history import, the
+management UI, and validation/build documentation. The customized version
+removes the original billing, API Key, subscription, pricing, analytics,
+request-event, and routing feature implementations.
+No affiliation with or endorsement by the upstream maintainers is claimed.
+
+Proxy configuration identity matching follows the MIT-licensed CLIProxyAPI StableIDGenerator and config synthesizer at commit ae3ee3be303fb07fb8173279923413005bf32177. The original license is included in licenses/CLIProxyAPI-MIT.txt.

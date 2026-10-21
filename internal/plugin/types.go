@@ -16,15 +16,17 @@ const (
 // Plugin identity. PluginID doubles as the dynamic library file name, the
 // `plugins.configs` key, and the Management/resource route segment.
 const (
-	PluginID   = "cpa-key-billing"
-	PluginName = "cpa-key-billing"
-	Version    = "1.4.2"
+	PluginID   = "cpa-codex-controls"
+	PluginName = "cpa-codex-controls"
+	Version    = "1.4.2-timezone.14"
 
-	MenuLabel       = "API Key Billing"
-	MenuDescription = "Manage downstream API key routing, billing, concurrency limits, subscription quotas, and usage"
-
-	GitHubRepository = "https://github.com/haowang02/cpa-plugin-key-billing"
+	MenuLabel       = "Account Controls"
+	MenuDescription = "Manage credential concurrency, timezone overrides, and diagnostics"
 )
+
+// CPA requires a nonempty repository. Release builds replace this placeholder
+// with the publishing repository using -ldflags -X. It is not a download source.
+var GitHubRepository = "https://github.com/YOUR_ACCOUNT/cpa-codex-controls"
 
 const (
 	MethodPluginRegister    = "plugin.register"
@@ -33,7 +35,6 @@ const (
 	MethodRequestInterceptBefore = "request.intercept_before"
 	MethodRequestInterceptAfter  = "request.intercept_after"
 	MethodRequestComplete        = "request.complete"
-	MethodSchedulerPick          = "scheduler.pick"
 
 	MethodUsageHandle = "usage.handle"
 
@@ -46,19 +47,8 @@ const (
 )
 
 const (
-	// MetadataCallerScope is sha256("cli-proxy-api:caller-scope:v1\x00"+apiKey)
-	// in hex. It is the only downstream-key identifier available at interception
-	// time, and it covers keys presented via query string as well as headers.
-	MetadataCallerScope    = "caller_scope"
-	MetadataGenerate       = "generate"
-	MetadataSource         = "source"
-	MetadataRequestPath    = "request_path"
-	MetadataRequestedModel = "requested_model"
-	MetadataSelectedAuth   = "selected_auth_id"
-	MetadataSelectedIndex  = "selected_auth_index"
-	// SourcePluginHostModelCallback is the MetadataSource value for nested
-	// plugin-initiated executions, which bypass client model and quota checks.
-	SourcePluginHostModelCallback = "plugin_host_model_callback"
+	MetadataGenerate      = "generate"
+	MetadataSelectedIndex = "selected_auth_index"
 )
 
 type Envelope struct {
@@ -100,6 +90,7 @@ type ConfigField struct {
 }
 
 type Capabilities struct {
+	RequestNormalizer         bool `json:"request_normalizer"`
 	RequestInterceptor        bool `json:"request_interceptor"`
 	RequestLifecyclePlugin    bool `json:"request_lifecycle_plugin"`
 	UsagePlugin               bool `json:"usage_plugin"`
@@ -107,28 +98,6 @@ type Capabilities struct {
 	Scheduler                 bool `json:"scheduler"`
 	SchedulerAcrossPriorities bool `json:"scheduler_across_priorities"`
 	QuotaProvider             bool `json:"quota_provider"`
-}
-
-type SchedulerPickRequest struct {
-	Provider string `json:"Provider"`
-	Model    string `json:"Model"`
-	Options  struct {
-		Metadata map[string]any `json:"Metadata"`
-	} `json:"Options"`
-	Candidates []SchedulerAuthCandidate `json:"Candidates"`
-}
-
-type SchedulerAuthCandidate struct {
-	ID         string            `json:"ID"`
-	Provider   string            `json:"Provider"`
-	Priority   int               `json:"Priority"`
-	Status     string            `json:"Status"`
-	Attributes map[string]string `json:"Attributes"`
-}
-
-type SchedulerPickResponse struct {
-	AuthID  string `json:"AuthID,omitempty"`
-	Handled bool   `json:"Handled"`
 }
 
 type RequestCompletion struct {
@@ -139,6 +108,9 @@ type RequestCompletion struct {
 }
 
 type RequestInterceptRequest struct {
+	Body           []byte         `json:"Body"`
+	ToFormat       string         `json:"ToFormat"`
+	HostCallbackID string         `json:"host_callback_id,omitempty"`
 	RequestID      string         `json:"RequestID"`
 	TraceID        string         `json:"TraceID"`
 	Headers        http.Header    `json:"Headers"`
@@ -149,57 +121,28 @@ type RequestInterceptRequest struct {
 }
 
 type RequestInterceptResponse struct {
+	Body            []byte      `json:"Body,omitempty"`
 	Terminate       bool        `json:"Terminate,omitempty"`
 	StatusCode      int         `json:"StatusCode,omitempty"`
 	ResponseHeaders http.Header `json:"ResponseHeaders,omitempty"`
 	ResponseBody    []byte      `json:"ResponseBody,omitempty"`
 }
 
+// Only failure diagnostics are consumed. Successful usage and token accounting are ignored.
 type UsageRecord struct {
-	RequestID           string        `json:"RequestID"`
-	TraceID             string        `json:"TraceID"`
-	Provider            string        `json:"Provider"`
-	BaseURL             string        `json:"BaseURL"`
-	ExecutorType        string        `json:"ExecutorType"`
-	Model               string        `json:"Model"`
-	Alias               string        `json:"Alias"`
-	APIKey              string        `json:"APIKey"`
-	IsNativeKey         *bool         `json:"IsNativeKey"`
-	AccessProvider      string        `json:"AccessProvider"`
-	SessionID           string        `json:"SessionID"`
-	ParentSessionID     string        `json:"ParentSessionID"`
-	AuthID              string        `json:"AuthID"`
-	AuthIndex           string        `json:"AuthIndex"`
-	AuthType            string        `json:"AuthType"`
-	Source              string        `json:"Source"`
-	ReasoningEffort     string        `json:"ReasoningEffort"`
-	ServiceTier         string        `json:"ServiceTier"`
-	ResponseServiceTier string        `json:"ResponseServiceTier"`
-	ResponseModel       string        `json:"ResponseModel"`
-	ResponseHeaders     http.Header   `json:"ResponseHeaders"`
-	Generate            bool          `json:"Generate"`
-	Stream              *bool         `json:"Stream"`
-	RequestedAt         time.Time     `json:"RequestedAt"`
-	Latency             time.Duration `json:"Latency"`
-	TTFT                time.Duration `json:"TTFT"`
-	Failed              bool          `json:"Failed"`
-	Failure             UsageFailure  `json:"Failure"`
-	Detail              UsageDetail   `json:"Detail"`
+	Provider    string        `json:"Provider"`
+	AuthIndex   string        `json:"AuthIndex"`
+	Model       string        `json:"Model"`
+	APIKey      string        `json:"APIKey"`
+	RequestedAt time.Time     `json:"RequestedAt"`
+	Latency     time.Duration `json:"Latency"`
+	TTFT        time.Duration `json:"TTFT"`
+	Failed      bool          `json:"Failed"`
+	Failure     UsageFailure  `json:"Failure"`
 }
-
 type UsageFailure struct {
 	StatusCode int    `json:"StatusCode"`
 	Body       string `json:"Body"`
-}
-
-type UsageDetail struct {
-	InputTokens         int64 `json:"InputTokens"`
-	OutputTokens        int64 `json:"OutputTokens"`
-	ReasoningTokens     int64 `json:"ReasoningTokens"`
-	CachedTokens        int64 `json:"CachedTokens"`
-	CacheReadTokens     int64 `json:"CacheReadTokens"`
-	CacheCreationTokens int64 `json:"CacheCreationTokens"`
-	TotalTokens         int64 `json:"TotalTokens"`
 }
 
 type ManagementRegistrationResponse struct {

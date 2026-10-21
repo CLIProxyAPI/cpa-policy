@@ -1,13 +1,4 @@
-const AI_PROVIDER_TYPES = [
-  { type: "claude", list: "claude-api-key", brand: "claude" },
-  { type: "codex", list: "codex-api-key", brand: "codex" },
-  { type: "gemini", list: "gemini-api-key", brand: "gemini" },
-  { type: "interactions", list: "interactions-api-key", brand: "gemini" },
-  { type: "vertex", list: "vertex-api-key", brand: "vertex" },
-  { type: "xai", list: "xai-api-key", brand: "xai" },
-  { type: "meta", list: "meta-api-key", brand: "meta" },
-  { type: "openai-compatibility", list: "openai-compatibility", brand: "openai" }
-];
+const AI_PROVIDER_TYPES = [{ type: "codex", list: "codex-api-key", brand: "codex" }];
 
 // Upstreams whose API keys can read their own account balance. A key's base URL must name one of
 // these hosts exactly, so a key is only ever sent to the upstream that issued it.
@@ -101,7 +92,7 @@ const AI_BALANCE_UPSTREAMS = [
 // CPA ends a proxied call after 60 seconds.
 const AI_BALANCE_TIMEOUT_MS = 65000;
 const AI_BALANCE_BATCH_CONCURRENCY = 3;
-const AI_BALANCE_CACHE_PREFIX = "cpa-key-billing.ai-balances.v1.admin.";
+const AI_BALANCE_CACHE_PREFIX = "cpa-codex-controls.ai-balances.v1.admin.";
 
 function configuredAIProviders(kind, entries) {
   const text = (value) => (typeof value === "string" ? value.trim() : "");
@@ -124,6 +115,7 @@ function configuredAIProviders(kind, entries) {
         ...base,
         auth_index: text(entry["auth-index"]),
         key_preview: previewCredential(key),
+        proxy_url: text(entry["proxy-url"]),
         weight: weight(entry.weight),
         disabled: excluded.some((model) => model.trim() === "*")
       });
@@ -138,6 +130,7 @@ function configuredAIProviders(kind, entries) {
         ...provider,
         auth_index: text(key["auth-index"]),
         key_preview: previewCredential(text(key["api-key"])),
+        proxy_url: text(key["proxy-url"]),
         weight: weight(key.weight)
       });
     }
@@ -158,22 +151,10 @@ async function fetchAIProviders() {
       return configuredAIProviders(kind, configuredCredentialEntries(config, kind.list));
     })
   );
-  const providers = lists.flat();
-  const indexes = [...new Set(providers.map((provider) => provider.auth_index).filter(Boolean))];
-  const usage = {};
-  if (indexes.length) {
-    const range = selectedRange(false);
-    await Promise.all(
-      batchedSearchParams("auth_index", indexes).map(async (query) => {
-        for (const [name, value] of Object.entries(range)) query.set(name, value);
-        Object.assign(usage, requireObject((await plugin("GET", "/ai-providers/usage?" + query))?.usage, m("ui.ai_providers")));
-      })
-    );
-  }
-  return providers.map((provider) => ({ ...provider, usage: provider.auth_index ? usage[provider.auth_index] || {} : null }));
+  return lists.flat();
 }
 
-function readAIProviders(reload = false) { return aiProvidersQuery.read(JSON.stringify(sharedTimeRanges.admin), fetchAIProviders, reload); }
+function readAIProviders(reload = false) { return aiProvidersQuery.read("ai-providers", fetchAIProviders, reload); }
 
 function updateAIProviders(providers) {
   const owner = adminUIState;
@@ -297,7 +278,7 @@ async function loadAIBalance(provider) {
   try {
     const balances = await upstream.read((path) => upstreamBalanceJSON(provider, "https://" + upstream.host + path), upstream.host);
     const result = {
-      fetched_at: new Date().toISOString(),
+      fetched_at: new ZonedDate().toISOString(),
       balances: balances.map((balance) => ({
         ...balance,
         parts: balance.parts?.filter(([, value]) => value != null).map(([label, value]) => [label, balanceAmount(value)])
@@ -365,11 +346,10 @@ async function queryFilteredAIBalances() {
 }
 
 function filteredAIProviders() {
-  const type = $("ai-provider-type").value;
   const search = $("ai-provider-search").value.trim().toLocaleLowerCase();
   return (aiProvidersQuery.value || []).filter((provider) => {
     if ($("ai-provider-enabled-only").checked && provider.disabled) return false;
-    if (type && provider.type !== type) return false;
+    if (provider.type !== "codex") return false;
     if (!search) return true;
     return [provider.base_url, provider.type, provider.name, provider.key_preview].some((value) =>
       String(value || "").toLocaleLowerCase().includes(search)
@@ -393,7 +373,7 @@ function renderAIBalanceRow(balance, fetchedAt) {
         el("time", {
           class: "ai-balance-time",
           datetime: fetchedAt,
-          text: m("ui.balance_queried_at_value", { v0: compactResetDate(new Date(fetchedAt)) })
+          text: m("ui.balance_queried_at_value", { v0: compactResetDate(new ZonedDate(fetchedAt)) })
         })
     ),
     (used || parts.length > 0) &&
@@ -440,14 +420,7 @@ function renderAIProviders() {
   const providers = filteredAIProviders();
   bulk.disabled = bulk.dataset.loading === "true" || !providers.some(aiBalanceUpstream);
   renderCollection(body, providers, {
-    headers: [
-      m("ui.ai_providers"),
-      m("ui.requests"),
-      m("ui.auth_total_tokens"),
-      m("ui.cache_rate"),
-      { label: m("ui.balance"), class: "credential-quota-column" },
-      m("ui.actions")
-    ],
+    headers: [m("ui.ai_providers"), { label: m("ui.balance"), class: "credential-quota-column" }, m("ui.actions")],
     attrs: { class: "credential-table" },
     empty: m("ui.no_ai_providers_match_the_filters"),
     render: renderAIProviderRow
@@ -488,13 +461,11 @@ function renderAIProviderRow(provider) {
                 text: provider.key_preview || m("ui.no_api_key_configured")
               })
             ),
-            credentialRoutingTag(provider),
             provider.disabled && el("span", { class: "tag warn", text: m("ui.disabled") })
           )
         )
       )
     ),
-    renderCredentialUsage(provider.usage),
     el("td", { class: "credential-quota-cell" }, renderAIBalance(provider)),
     el(
       "td",
@@ -502,6 +473,7 @@ function renderAIProviderRow(provider) {
       el(
         "div",
         { class: "credential-actions" },
+        credentialSettingsButton(provider, "provider"),
         el(
           "button",
           {
@@ -519,9 +491,8 @@ function renderAIProviderRow(provider) {
   );
 }
 
-$("ai-provider-type").append(...AI_PROVIDER_TYPES.map((kind) => el("option", { value: kind.type, text: kind.type })));
 resetAIBalanceBatch();
-for (const filter of [$("ai-provider-enabled-only"), $("ai-provider-type")]) {
+for (const filter of [$("ai-provider-enabled-only")]) {
   filter.addEventListener("change", () => {
     saveChoice("admin", filter.id);
     renderAIProviders();

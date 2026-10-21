@@ -25,42 +25,26 @@ function tokens(value, thousandsDigits = 1) {
   if (n >= 1e3) return (n / 1e3).toFixed(thousandsDigits) + "K";
   return String(n);
 }
-function quotaTokens(n) {
-  const [scale, suffix] = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]].find(([scale]) => n >= scale) || [1e3, "K"];
-  return Number((n / scale).toFixed(n < 1000 ? 3 : 2)) + suffix;
-}
-function exactTokens(value) { return Math.trunc(Number(value || 0)).toLocaleString("en-US"); }
+
 function latency(value) {
   const milliseconds = Number(value || 0);
   if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "—";
   if (milliseconds < 1000) return Math.round(milliseconds) + " ms";
   return (milliseconds / 1000).toFixed(2) + " s";
 }
-function tokenRate(value) { return value.toFixed(1) + " t/s"; }
-function tokenRateRange(from, to) { return from.toFixed(1) + "–" + tokenRate(to); }
-function outputTPS(cost, latencyMS, measured) { return measured && latencyMS > 0 ? (cost.billed_output_tokens * 1000) / latencyMS : null; }
-function requestInputTokens(cost) { return cost.uncached_input_tokens + cost.cache_read_tokens + cost.cache_write_tokens; }
-function cacheReadRate(cacheRead, totalInput) {
-  const input = Number(totalInput || 0);
-  if (input <= 0) return "0.00%";
-  return ((Number(cacheRead || 0) / input) * 100).toFixed(2) + "%";
-}
-function tokenThreshold(value) {
-  const n = Number(value || 0);
-  if (n >= 1e9) return String(Number((n / 1e9).toFixed(3))) + "B";
-  if (n >= 1e6) return String(Number((n / 1e6).toFixed(3))) + "M";
-  if (n >= 1e3) return String(Number((n / 1e3).toFixed(3))) + "K";
-  return exactTokens(n);
-}
+
 function when(value) {
   const parts = dateTimeParts(value);
   return parts ? parts.date + " " + parts.time : "—";
 }
-let dateFormatter = new Intl.DateTimeFormat(locale());
-let timeFormatter = new Intl.DateTimeFormat(locale(), { hour: "numeric", minute: "numeric", second: "numeric", hour12: false });
+let dateFormatter = new Intl.DateTimeFormat(locale(), billingDateOptions());
+let timeFormatter = new Intl.DateTimeFormat(
+  locale(),
+  billingDateOptions({ hour: "numeric", minute: "numeric", second: "numeric", hour12: false })
+);
 function dateTimeParts(value) {
   if (!value) return null;
-  const date = new Date(value);
+  const date = new ZonedDate(value);
   if (isNaN(date.getTime()) || date.getFullYear() < 2000) return null;
   return { time: timeFormatter.format(date), date: dateFormatter.format(date) };
 }
@@ -121,46 +105,8 @@ function maskedLabelText(value) {
   return provider ? maskedTailText(provider, account) : maskedText(account);
 }
 
-function apiKeyIdentity(view) {
-  if (currentRole === "admin") view = keyDirectory.resolve(view);
-  const scope = String(view.scope || view.key || "");
-  const preview = String(view.preview || "");
-  const candidate = view.label || "";
-  const name = String(candidate);
-  // Account views identify the caller by label and preview alone, without a scope.
-  const label = name && name !== preview && name !== scope ? candidate : "";
-  const primary = label || preview || (scope ? "unknown" : m("ui.unassigned"));
-  const secondary = label ? preview : "";
-  return { primary, secondary, text: displayLabel(secondary ? primary + DISPLAY_SEPARATOR + secondary : primary) };
-}
-
-function renderAPIKeyIdentity(view, options = {}) {
-  const identity = apiKeyIdentity(view);
-  const trailing = options.trailing || [];
-  const line = (text, className, children = []) => el("span", { class: "api-key-identity-line" + className }, maskedText(text), children);
-  return el(
-    "span",
-    { class: "api-key-identity" + (options.stacked ? " api-key-identity-stacked" : "") },
-    line(identity.primary, "", identity.secondary ? [] : trailing),
-    identity.secondary ? line(identity.secondary, " api-key-identity-secondary", trailing) : null
-  );
-}
-
 function matchesTerm(text, term) {
   return (!term || String(displayLabel(text)).toLowerCase().includes(String(displayLabel(term)).toLowerCase()));
 }
 
 // Group prefixed and unprefixed variants by base model name.
-function modelIdParts(modelID) {
-  const slash = modelID.indexOf("/");
-  if (slash < 0) return { name: modelID, prefix: "" };
-  return { name: modelID.slice(slash + 1), prefix: modelID.slice(0, slash) };
-}
-
-function compareModelId(a, b) {
-  const ka = modelIdParts(a);
-  const kb = modelIdParts(b);
-  if (ka.name !== kb.name) return ka.name < kb.name ? -1 : 1;
-  if (ka.prefix !== kb.prefix) return ka.prefix < kb.prefix ? -1 : 1;
-  return 0;
-}

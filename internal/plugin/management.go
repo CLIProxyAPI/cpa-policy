@@ -1,53 +1,23 @@
 package plugin
 
 import (
+	"bytes"
+	"cpa-codex-controls/internal/messages"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
-
-	"cpa-key-billing/internal/billing"
-	"cpa-key-billing/internal/messages"
 )
 
 const (
-	managementBase = "/v0/management/plugins/" + PluginID
-	resourceBase   = "/v0/resource/plugins/" + PluginID
-	resourceUIPath = "/ui"
-)
-
-const (
-	routeKeys                   = "/keys"
-	routeCredentials            = "/credentials"
-	routeProfile                = "/profile"
-	routeSubscription           = "/subscription"
-	routeRouting                = "/routing"
-	routePrices                 = "/prices"
-	routeReferencePrices        = "/prices/reference"
-	routeReferencePricesStatus  = "/prices/reference/status"
-	routeReferencePricesRefresh = "/prices/reference/refresh"
-	routePlans                  = "/plans"
-	routeRoutes                 = "/routes"
-	routeKeysRoutes             = "/keys/routes"
-	routeKeysBind               = "/keys/bind"
-	routeKeysUnbind             = "/keys/unbind"
-	routeKeysReset              = "/keys/reset"
-	routeKeysLabel              = "/keys/label"
-	routeKeysConcurrency        = "/keys/concurrency"
-	routeKeysSync               = "/keys/sync"
-	routeCredentialsSync        = "/credentials/sync"
-	routeEvents                 = "/events"
-	routeEventKeys              = "/events/keys"
-	routeErrors                 = "/errors"
-	routeAnalysis               = "/analysis"
-	routeAnalysisSpeed          = "/analysis/speed"
-	routePluginLogs             = "/plugin-logs"
-	routeAuthFiles              = "/auth-files"
-	routeAuthQuota              = "/auth-files/quota"
-	routeAuthQuotaReset         = "/auth-files/quota/reset"
-	routeAuthFileHistory        = "/auth-files/history"
-	routeAuthFilePeriodModels   = "/auth-files/history/models"
-	routeAIProviderUsage        = "/ai-providers/usage"
+	managementBase      = "/v0/management/plugins/" + PluginID
+	resourceBase        = "/v0/resource/plugins/" + PluginID
+	resourceUIPath      = "/ui"
+	routeAuthFiles      = "/auth-files"
+	routeAuthQuota      = "/auth-files/quota"
+	routeAuthQuotaReset = "/auth-files/quota/reset"
 )
 
 type managementEndpoint struct {
@@ -56,105 +26,34 @@ type managementEndpoint struct {
 }
 
 var managementEndpoints = []managementEndpoint{
-	{http.MethodGet, routeKeys, "View API key status", func(a *App, _ ManagementRequest) ManagementResponse {
-		return JSONResponse(http.StatusOK, map[string]any{"keys": a.keyRows()})
+	{"GET", "/concurrency", "Read default credential concurrency policy", (*App).concurrencySettings},
+	{"POST", "/concurrency/validate", "Validate default credential concurrency policy", (*App).validateConcurrency},
+	{"GET", "/credential-policies", "Read credential concurrency and timezone policies", (*App).credentialPolicies},
+	{"POST", "/credential-policies/validate", "Validate credential policies", (*App).validateCredentialPolicies},
+	{"POST", "/location/detect", "Detect proxy exit location without saving", (*App).detectLocation},
+	{"GET", "/location", "Read global timezone settings", (*App).locationSettings},
+	{"POST", "/location/validate", "Validate global timezone settings", (*App).validateLocation},
+	{"GET", routeAuthFiles, "List auth files", (*App).authFiles},
+	{"GET", routeAuthQuota, "Query live provider quota", (*App).authQuota},
+	{"POST", routeAuthQuotaReset, "Reset upstream quota", (*App).authQuotaReset},
+	{"GET", "/errors", "List upstream failures", func(a *App, r ManagementRequest) ManagementResponse { return a.diagnosticPage(r, "errors") }},
+	{"GET", "/plugin-logs", "List plugin logs", func(a *App, r ManagementRequest) ManagementResponse { return a.diagnosticPage(r, "logs") }},
+	{"DELETE", "/plugin-logs", "Clear plugin logs", func(a *App, _ ManagementRequest) ManagementResponse {
+		count, err := a.store.ClearPluginLogs()
+		if err != nil {
+			return internalErrorResponse(err)
+		}
+		return JSONResponse(200, map[string]any{"deleted": count})
 	}},
-	{http.MethodGet, routePlans, "View subscription plans", func(a *App, _ ManagementRequest) ManagementResponse {
-		return JSONResponse(http.StatusOK, map[string]any{"plans": a.store.Plans()})
-	}},
-	{http.MethodGet, routeRoutes, "View routing rules", func(a *App, _ ManagementRequest) ManagementResponse {
-		return JSONResponse(http.StatusOK, map[string]any{"routes": a.routeRows()})
-	}},
-	{http.MethodGet, routeCredentials, "View routing credential options", (*App).listCredentials},
-	{http.MethodGet, routePrices, "View model pricing", func(a *App, req ManagementRequest) ManagementResponse { return a.listPrices(req, viewAccess{}) }},
-	{http.MethodGet, routeReferencePrices, "Search model reference prices", (*App).searchReferencePrices},
-	{http.MethodGet, routeReferencePricesStatus, "View reference price status", func(a *App, _ ManagementRequest) ManagementResponse { return a.referencePriceStatus() }},
-	{http.MethodPost, routeReferencePricesRefresh, "Update reference prices", func(a *App, _ ManagementRequest) ManagementResponse { return a.refreshReferencePrices() }},
-	{http.MethodDelete, routePrices, "Delete custom model pricing", (*App).deletePrice},
-	{http.MethodPut, routePrices, "Update model pricing", (*App).putPrices},
-	{http.MethodPost, routePlans, "Create subscription plan", (*App).createPlan},
-	{http.MethodPatch, routePlans, "Update subscription plan", (*App).updatePlan},
-	{http.MethodDelete, routePlans, "Delete subscription plan and unbind API keys", (*App).deletePlan},
-	{http.MethodPost, routeRoutes, "Create routing rule", (*App).createRoute},
-	{http.MethodPatch, routeRoutes, "Update routing rule", (*App).updateRoute},
-	{http.MethodDelete, routeRoutes, "Delete routing rule and remove its bindings", (*App).deleteRoute},
-	{http.MethodPut, routeKeysRoutes, "Update API key routing bindings", (*App).setKeyRoutes},
-	{http.MethodPost, routeKeysBind, "Bind API key to subscription plan", (*App).bindKey},
-	{http.MethodPost, routeKeysUnbind, "Unbind API key from subscription plan", (*App).unbindKey},
-	{http.MethodPost, routeKeysReset, "Reset subscription quotas for selected API keys", (*App).resetKeys},
-	{http.MethodPost, routeKeysLabel, "Set API key label", (*App).labelKey},
-	{http.MethodPost, routeKeysConcurrency, "Set API key concurrency limit", (*App).setKeyConcurrency},
-	{http.MethodPost, routeKeysSync, "Sync API keys from CLIProxyAPI", (*App).syncKeys},
-	{http.MethodPost, routeCredentialsSync, "Sync configured credentials", (*App).syncConfiguredCredentials},
-	{http.MethodGet, routeEventKeys, "View API keys in the event time range", (*App).eventKeys},
-	{http.MethodGet, routeEvents, "List request events with pagination", func(a *App, req ManagementRequest) ManagementResponse {
-		return a.listRequestEvents(req, viewAccess{})
-	}},
-	{http.MethodGet, routeErrors, "List error events with pagination", func(a *App, req ManagementRequest) ManagementResponse {
-		return a.listRequestErrors(req, viewAccess{})
-	}},
-	{http.MethodGet, routeAnalysis, "View usage distribution", func(a *App, req ManagementRequest) ManagementResponse { return a.analysis(req, viewAccess{}) }},
-	{http.MethodGet, routeAnalysisSpeed, "View model speed trends", func(a *App, req ManagementRequest) ManagementResponse {
-		return a.analysisSpeed(req, viewAccess{})
-	}},
-	{http.MethodGet, routePluginLogs, "List plugin logs with pagination", (*App).listPluginLogs},
-	{http.MethodDelete, routePluginLogs, "Clear plugin logs", func(a *App, _ ManagementRequest) ManagementResponse { return a.clearPluginLogs() }},
-	{http.MethodGet, routeAuthFiles, "View auth files", func(a *App, req ManagementRequest) ManagementResponse { return a.authFiles(req, viewAccess{}) }},
-	{http.MethodGet, routeAuthQuota, "Query auth file quotas", func(a *App, req ManagementRequest) ManagementResponse { return a.authQuota(req, viewAccess{}) }},
-	{http.MethodPost, routeAuthQuotaReset, "Reset auth file quotas", func(a *App, req ManagementRequest) ManagementResponse { return a.authQuotaReset(req, viewAccess{}) }},
-	{http.MethodGet, routeAuthFileHistory, "View 30-day auth file usage and quota periods", func(a *App, req ManagementRequest) ManagementResponse {
-		return a.authFileHistory(req, viewAccess{})
-	}},
-	{http.MethodGet, routeAuthFilePeriodModels, "View an auth file quota period's usage by model", func(a *App, req ManagementRequest) ManagementResponse {
-		return a.authFilePeriodModels(req, viewAccess{})
-	}},
-	{http.MethodGet, routeAIProviderUsage, "View configured AI provider credential usage", (*App).aiProviderUsage},
-}
-
-type resourceEndpoint struct {
-	path   string
-	handle func(*App, ManagementRequest, viewAccess) ManagementResponse
-}
-
-var resourceEndpoints = []resourceEndpoint{
-	{routeProfile, func(a *App, _ ManagementRequest, access viewAccess) ManagementResponse {
-		return a.accountProfile(access)
-	}},
-	{routeSubscription, func(a *App, _ ManagementRequest, access viewAccess) ManagementResponse {
-		return a.accountSubscription(access)
-	}},
-	{routeRouting, func(a *App, _ ManagementRequest, access viewAccess) ManagementResponse {
-		return a.accountRouting(access)
-	}},
-	{routePrices, (*App).listPrices},
-	{routeAnalysis, (*App).analysis},
-	{routeAnalysisSpeed, (*App).analysisSpeed},
-	{routeEvents, (*App).listRequestEvents},
-	{routeErrors, (*App).listRequestErrors},
-	{routeAuthFiles, (*App).authFiles},
-	{routeAuthQuota, (*App).authQuota},
-	{routeAuthQuotaReset, (*App).authQuotaReset},
-	{routeAuthFileHistory, (*App).authFileHistory},
-	{routeAuthFilePeriodModels, (*App).authFilePeriodModels},
 }
 
 func managementRegistration() ManagementRegistrationResponse {
-	registration := ManagementRegistrationResponse{
-		Routes:    make([]ManagementRoute, 0, len(managementEndpoints)),
-		Resources: make([]ResourceRoute, 1, len(resourceEndpoints)+1),
+	result := ManagementRegistrationResponse{Resources: []ResourceRoute{{Path: resourceBase + resourceUIPath, Menu: MenuLabel, Description: MenuDescription}}}
+	for _, e := range managementEndpoints {
+		result.Routes = append(result.Routes, ManagementRoute{Method: e.method, Path: managementBase + e.path, Description: e.description})
 	}
-	registration.Resources[0] = ResourceRoute{Path: resourceBase + resourceUIPath, Menu: MenuLabel, Description: MenuDescription}
-	for _, endpoint := range managementEndpoints {
-		registration.Routes = append(registration.Routes, ManagementRoute{
-			Method: endpoint.method, Path: managementBase + endpoint.path, Description: endpoint.description,
-		})
-	}
-	for _, endpoint := range resourceEndpoints {
-		registration.Resources = append(registration.Resources, ResourceRoute{Path: resourceBase + endpoint.path})
-	}
-	return registration
+	return result
 }
-
 func (a *App) handleManagement(raw []byte) ([]byte, error) {
 	var req ManagementRequest
 	if errUnmarshal := json.Unmarshal(raw, &req); errUnmarshal != nil {
@@ -182,87 +81,60 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 			Body: uiHTML,
 		})
 	}
-	if path != resourceBase && strings.HasPrefix(path, resourceBase+"/") {
-		return OKEnvelope(a.routeResource(req, strings.TrimPrefix(path, resourceBase)))
-	}
 	if path != managementBase && !strings.HasPrefix(path, managementBase+"/") {
 		return OKEnvelope(JSONError(http.StatusNotFound, "not_found", "Management route not found: "+req.Method+" "+req.Path))
 	}
 	return OKEnvelope(a.routeManagement(req, strings.TrimPrefix(path, managementBase)))
 }
-
 func (a *App) routeManagement(req ManagementRequest, suffix string) ManagementResponse {
-	for _, endpoint := range managementEndpoints {
-		if req.Method == endpoint.method && suffix == endpoint.path {
-			if req.Query.Get("view") == "1" && req.Method != http.MethodGet {
-				return a.mutateWithView(req, suffix, endpoint.handle)
-			}
-			return endpoint.handle(a, req)
+	for _, e := range managementEndpoints {
+		if req.Method == e.method && suffix == e.path {
+			return e.handle(a, req)
 		}
 	}
-	return JSONError(http.StatusNotFound, "not_found", "Management route not found: "+req.Method+" "+req.Path)
+	return JSONError(404, "not_found", "Management route not found")
 }
-
-// Mutation views use local state, never host discovery.
-func (a *App) mutateWithView(req ManagementRequest, path string, handle func(*App, ManagementRequest) ManagementResponse) ManagementResponse {
-	var input struct {
-		Data   json.RawMessage `json:"data"`
-		Models []string        `json:"models,omitempty"`
+func decodeStrict(body []byte, target any) error {
+	d := json.NewDecoder(bytes.NewReader(body))
+	d.DisallowUnknownFields()
+	if err := d.Decode(target); err != nil {
+		return fmt.Errorf("Invalid request body: %w", err)
 	}
-	if err := decodeStrict(req.Body, &input); err != nil {
-		return errorResponse(err)
+	if d.Decode(&struct{}{}) != io.EOF {
+		return fmt.Errorf("The request body must contain exactly one JSON value")
 	}
-	for _, model := range input.Models {
-		if len(strings.TrimSpace(model)) > 1024 {
-			return JSONError(http.StatusBadRequest, "invalid", "Model ID is too long")
-		}
-	}
-	req.Body = input.Data
-	response := handle(a, req)
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return response
-	}
-	view := map[string]any{}
-	switch path {
-	case routePlans, routeRoutes, routeKeysBind, routeKeysUnbind, routeKeysReset, routeKeysLabel, routeKeysConcurrency, routeKeysRoutes:
-		view["keys"] = a.keyRows()
-		if path == routePlans {
-			view["plans"] = a.store.Plans()
-		}
-		if path == routeRoutes || path == routeKeysRoutes {
-			view["routes"] = a.routeRows()
-		}
-	case routePrices, routeReferencePricesRefresh:
-		prices, err := a.store.ModelPriceRows(input.Models, true)
-		if err != nil {
-			// The write has committed. A display-read failure must not turn it into
-			// a reported write failure or invite the caller to repeat the mutation.
-			view["error"] = err.Error()
-		} else {
-			view["prices"] = prices
-		}
-		view["metadata"] = a.store.ReferencePriceMetadata()
-	case routePluginLogs:
-		view["logs_cleared"] = true
-	}
-	var result map[string]json.RawMessage
-	if err := json.Unmarshal(response.Body, &result); err != nil || result == nil {
-		return response
-	}
-	result["view"], _ = json.Marshal(view)
-	return JSONResponse(response.StatusCode, result)
+	return nil
 }
-
 func errorResponse(err error) ManagementResponse {
-	detail := messages.FromError(err)
-	switch billing.KindOf(err) {
-	case billing.KindInvalid:
-		return jsonMessageError(http.StatusBadRequest, string(billing.KindInvalid), detail)
-	case billing.KindNotFound:
-		return jsonMessageError(http.StatusNotFound, string(billing.KindNotFound), detail)
-	case billing.KindConflict:
-		return jsonMessageError(http.StatusConflict, string(billing.KindConflict), detail)
-	default:
-		return jsonMessageError(http.StatusInternalServerError, "internal_error", detail)
+	return jsonMessageError(400, "invalid", messages.FromError(err))
+}
+func internalErrorResponse(err error) ManagementResponse {
+	return jsonMessageError(500, "internal_error", messages.FromError(err))
+}
+func (a *App) diagnosticPage(req ManagementRequest, kind string) ManagementResponse {
+	before := int64(0)
+	limit := 50
+	if v := req.Query.Get("before_id"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return JSONError(400, "invalid", "Invalid before_id")
+		}
+		before = n
 	}
+	if v := req.Query.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			return JSONError(400, "invalid", "Invalid limit")
+		}
+		limit = n
+	}
+	level := req.Query.Get("level")
+	if level != "" && level != "debug" && level != "info" && level != "error" {
+		return JSONError(400, "invalid", "Invalid log level")
+	}
+	page, err := a.store.ReadPage(kind, level, before, limit)
+	if err != nil {
+		return internalErrorResponse(err)
+	}
+	return JSONResponse(200, page)
 }

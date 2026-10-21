@@ -1,18 +1,3 @@
-const CONFIGURED_CREDENTIAL_FIELDS = [
-  ["gemini-api-key", "gemini", "gemini:apikey", true],
-  ["interactions-api-key", "gemini-interactions", "gemini-interactions:apikey", true],
-  ["claude-api-key", "claude", "claude:apikey", true],
-  ["codex-api-key", "codex", "codex:apikey", true],
-  ["xai-api-key", "xai", "xai:apikey", true],
-  ["meta-api-key", "meta", "meta:apikey", true],
-  ["vertex-api-key", "vertex", "vertex:apikey", false]
-];
-
-function sortedConfiguredHeaders(headers) {
-  if (!headers) return "";
-  return Object.keys(headers).sort().map((key) => key + "\0" + headers[key] + "\0").join("");
-}
-
 async function sha256Hex(value) {
   const bytes = new TextEncoder().encode(value);
   if (window.crypto?.subtle) {
@@ -69,24 +54,6 @@ async function sha256Hex(value) {
   return Array.from(hash, (word) => word.toString(16).padStart(8, "0")).join("");
 }
 
-async function configuredCredentialRef(kind, parts, counters) {
-  // These hashes must stay byte-identical to CPA's StableIDGenerator and
-  // the plugin's CredentialFingerprint so exact bindings match candidates.
-  const digest = await sha256Hex(kind + parts.map((part) => "\0" + String(part || "").trim()).join(""));
-  const base = kind + ":" + digest.slice(0, 12);
-  const collision = counters.get(base) || 0;
-  counters.set(base, collision + 1);
-  const id = collision ? base + "-" + collision : base;
-  return "sha256:" + (await sha256Hex("cpa-key-billing:credential:v1\0" + id));
-}
-
-function parseConfiguredAPIKeys(config) {
-  const keys = config?.["api-keys"];
-  if (keys === null) return [];
-  if (!Array.isArray(keys) || keys.some((key) => typeof key !== "string")) throw new UIError(m("ui.invalid_cpa_api_key_list"));
-  return keys;
-}
-
 function configuredCredentialEntries(config, field) {
   const entries = config[field] == null ? [] : requireArray(config[field], field);
   const validateEntry = (entry) => {
@@ -119,109 +86,20 @@ function configuredCredentialEntries(config, field) {
   return entries;
 }
 
-async function parseConfiguredCredentials(config) {
-  const generation = sessionGeneration;
-  const counters = new Map();
-  const credentials = [];
-
-  for (const [field, provider, kind, usesHeaders] of CONFIGURED_CREDENTIAL_FIELDS) {
-    for (const entry of configuredCredentialEntries(config, field)) {
-      const apiKey = (entry["api-key"] || "").trim();
-      const baseURL = (entry["base-url"] || "").trim();
-      if (!apiKey && !baseURL) continue;
-      const parts = [apiKey, baseURL, entry["proxy-url"]];
-      if (usesHeaders) parts.push(entry.prefix, sortedConfiguredHeaders(entry.headers));
-      credentials.push({
-        ref: await configuredCredentialRef(kind, parts, counters),
-        provider,
-        display_name: previewCredential(apiKey),
-        disabled: (entry["excluded-models"] || []).some((model) => model.trim() === "*")
-      });
-    }
-  }
-
-  for (const entry of configuredCredentialEntries(config, "openai-compatibility")) {
-    // CPA does not create runtime credentials or consume IDs for disabled providers.
-    if (entry.disabled === true) continue;
-    const providerName = (entry.name || "").trim().toLowerCase() || "openai-compatibility";
-    const provider =
-      providerName === "openai-compatibility" || providerName.startsWith("openai-compatible-")
-        ? providerName
-        : "openai-compatible-" + providerName;
-    const apiKeys = entry["api-key-entries"] || [];
-    if (!apiKeys.length) {
-      credentials.push({
-        ref: await configuredCredentialRef("openai-compatibility:" + providerName, [entry["base-url"]], counters),
-        provider,
-        display_name: "",
-        disabled: false
-      });
-      continue;
-    }
-    for (const apiKeyEntry of apiKeys) {
-      const apiKey = (apiKeyEntry["api-key"] || "").trim();
-      credentials.push({
-        ref: await configuredCredentialRef(
-          "openai-compatibility:" + providerName,
-          [apiKey, entry["base-url"], apiKeyEntry["proxy-url"]],
-          counters
-        ),
-        provider,
-        display_name: previewCredential(apiKey),
-        disabled: false
-      });
-    }
-  }
-
-  if (generation !== sessionGeneration) throw new StaleRequestError();
-  return credentials;
-}
-
-function credentialName(item) {
-  return window.billingI18n.serverMessage(
-    item.display_name_message,
-    item.display_name || (item.source === "auth-files" ? m("ui.no_email_provided") : m("ui.no_api_key_configured"))
-  );
-}
-
-function credentialLabel(item) { return m("ui.join", { v0: item.provider, v1: DISPLAY_SEPARATOR, v2: credentialName(item) }); }
-
-function credentialSourceLabel(source) { return source === "auth-files" ? m("ui.auth_files") : m("ui.ai_providers"); }
-
-function credentialProviderLabel(item) {
-  return m("ui.join", { v0: credentialSourceLabel(item.source), v1: DISPLAY_SEPARATOR, v2: item.provider });
-}
-
-function credentialIcon(item) { return item.source === "auth-files" ? "file-key" : "key"; }
-
-function credentialSourceRank(item) { return item.source === "auth-files" ? 0 : 1; }
-
-function compareCredentialProviders(a, b) {
-  return credentialSourceRank(a) - credentialSourceRank(b) || a.provider.localeCompare(b.provider);
-}
-
-function compareCredentials(a, b) {
-  return (
-    credentialSourceRank(a) - credentialSourceRank(b) || String(credentialLabel(a)).localeCompare(String(credentialLabel(b)), locale())
-  );
-}
-
-function sameCredentialProvider(a, b) { return a.source === b.source && a.provider === b.provider; }
-
-function clearCredentialScope(account) {
-  const role = account ? "account" : "admin";
-  if (!account) forgetAIBalances();
+function clearCredentialScope() {
+  const role = "admin";
+  forgetAIBalances();
   const key = authQuotaStorageKey(role);
   if (key) { try { sessionStorage.removeItem(key); } catch (_) {} }
   credentialScope[role] = "";
-  resetAuthQuotaMemory(account);
+  resetAuthQuotaMemory();
 }
 
-async function activateCredentialScope(account, credential) {
+async function activateCredentialScope(credential) {
   const generation = sessionGeneration;
-  const role = account ? "account" : "admin";
-  resetAuthQuotaMemory(account);
-  if (!account) resetAIBalanceMemory();
+  const role = "admin";
+  resetAuthQuotaMemory();
+  resetAIBalanceMemory();
   credentialScope[role] = "";
   try {
     const scope = (await sha256Hex(role + "|" + credential)).slice(0, 32);
@@ -231,10 +109,9 @@ async function activateCredentialScope(account, credential) {
     if (generation !== sessionGeneration) throw new StaleRequestError();
     return;
   }
-  if (!account) restoreAIBalances();
-  restoreAuthQuotaCache(account);
+  restoreAIBalances();
+  restoreAuthQuotaCache();
 }
-
 const PROVIDER_LABELS = {
   claude: "Claude",
   antigravity: "Antigravity",
@@ -246,12 +123,6 @@ const PROVIDER_LABELS = {
   meta: "Meta",
   openai: "OpenAI"
 };
-
-function credentialRoutingTag(credential) {
-  const priority = Number.isFinite(credential.priority) ? credential.priority : "—";
-  const weight = Number.isFinite(credential.weight) ? credential.weight : "—";
-  return metricTag([["P", priority], ["W", weight]], m("ui.credential_routing", { priority, weight }));
-}
 
 const PROVIDER_ICONS = {
   claude: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></svg>`,
@@ -269,101 +140,4 @@ function providerIcon(brand) {
   const markup = PROVIDER_ICONS[brand];
   if (!markup) return null;
   return el("span", { class: "provider-icon", "data-provider": brand, role: "img", "aria-label": PROVIDER_LABELS[brand] }, iconSVG(markup));
-}
-
-function renderModelUsageTable(models) {
-  const columns = [
-    [m("ui.requests"), (row) => tokens(row.requests, 2)],
-    [m("ui.input"), (row) => tokens(row.input_tokens)],
-    [m("ui.output"), (row) => tokens(row.output_tokens)],
-    [m("ui.cache_read"), (row) => tokens(row.cache_read_tokens)],
-    models.some((row) => row.cache_write_tokens > 0) && [m("ui.cache_write"), (row) => tokens(row.cache_write_tokens)],
-    [m("ui.cache_rate"), (row) => cacheReadRate(row.cache_read_tokens, row.input_tokens)],
-    [m("ui.cost"), (row) => usd(row.cost_usd, 2)]
-  ].filter(Boolean);
-  return el(
-    "table",
-    { class: "model-usage-table" },
-    el("thead", {}, el("tr", {}, el("th", { text: m("ui.model") }), columns.map(([label]) => el("th", { class: "num", text: label })))),
-    el(
-      "tbody",
-      {},
-      models.map((row) =>
-        el(
-          "tr",
-          {},
-          el("td", { text: row.model || m("ui.unknown_model") }),
-          columns.map(([, value]) => el("td", { class: "num", text: value(row) }))
-        )
-      )
-    )
-  );
-}
-
-function modelUsageTooltip(models) { return models?.length ? () => [renderModelUsageTable(models)] : null; }
-
-function credentialUsageSummary(usage) {
-  const count = usage.requests || 0;
-  const failed = usage.failed || 0;
-  return {
-    count,
-    failed,
-    success: count ? (((count - failed) / count) * 100).toFixed(2) + "%" : "—",
-    total: (usage.input_tokens || 0) + (usage.output_tokens || 0),
-    cache: usage.input_tokens ? ((usage.cache_read_tokens / usage.input_tokens) * 100).toFixed(2) + "%" : "—"
-  };
-}
-
-function credentialUsageMetric(name, label, value, secondary) {
-  const detail =
-    secondary &&
-    el(
-      "span",
-      { class: "credential-usage-detail" + (secondary.inline ? " inline" : "") },
-      el("span", { class: "credential-usage-detail-label", text: secondary.label }),
-      el("span", { class: "credential-usage-detail-value", text: secondary.value })
-    );
-  return el(
-    "td",
-    { class: "credential-" + name + "-cell" },
-    el(
-      "div",
-      { class: "credential-usage-metric" },
-      el("span", { class: "credential-usage-label", text: label }),
-      el("span", { class: "credential-usage-value" }, value, secondary?.inline && detail)
-    ),
-    !secondary?.inline && detail
-  );
-}
-
-// The request, token and cache cells of a credential's row. Usage is recorded by auth index,
-// so a credential without one has no usage to show.
-function renderCredentialUsage(usage) {
-  if (!usage) {
-    return [
-      credentialUsageMetric("requests", m("ui.requests"), "—"),
-      credentialUsageMetric("tokens", m("ui.auth_total_tokens"), "—"),
-      credentialUsageMetric("cache", m("ui.cache_rate"), "—")
-    ];
-  }
-  const { count, failed, success, total, cache } = credentialUsageSummary(usage);
-  const breakdown = modelUsageTooltip(usage.models);
-  const totalTokens = breakdown ? el("span", { class: "breakdown-value", ...hoverTooltipProps(breakdown) }, tokens(total)) : tokens(total);
-  const requests = [
-    tokens(count, 2),
-    " (",
-    el("span", { class: "credential-request-success", text: tokens(count - failed, 2) }),
-    DISPLAY_SLASH,
-    el("span", { class: "credential-request-failed", text: tokens(failed, 2) }),
-    ")"
-  ];
-  return [
-    credentialUsageMetric("requests", m("ui.requests"), requests, { label: m("ui.success_rate"), value: success }),
-    credentialUsageMetric("tokens", m("ui.auth_total_tokens"), totalTokens, {
-      label: m("ui.cost"),
-      value: usd(usage.cost_usd, 2),
-      inline: true
-    }),
-    credentialUsageMetric("cache", m("ui.cache_rate"), cache)
-  ];
 }

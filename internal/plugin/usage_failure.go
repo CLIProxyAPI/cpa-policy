@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"strings"
 
-	"cpa-key-billing/internal/billing"
+	"cpa-codex-controls/internal/settings"
 )
 
-func usageFailureDetails(failure UsageFailure) billing.RequestError {
+func usageFailureDetails(failure UsageFailure) settings.ErrorDetail {
 	body := normalizeFailureBody(failure.Body)
-	return billing.RequestError{
+	return settings.ErrorDetail{
 		StatusCode: validFailureStatus(failure.StatusCode),
 		ErrorType:  failureErrorType(body),
 		Body:       body,

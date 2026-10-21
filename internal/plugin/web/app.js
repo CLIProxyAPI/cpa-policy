@@ -1,441 +1,138 @@
-const PAGE_REFRESH_INTERVALS = [0, 5, 10, 30, 60, 300];
-const PAGE_STALE_MS = 5 * 60 * 1000;
-let pageRefreshTimer = 0;
-let pageRefreshTarget = null;
-
-function pendingPageLoads(page) {
-  // Filters and pagination can read sources outside a full-page load.
-  return page ? [page.task, ...page.sources.map((source) => source.task)].filter(Boolean) : [];
-}
-
-function clearPageRefresh() {
-  clearTimeout(pageRefreshTimer);
-  pageRefreshTimer = 0;
-  pageRefreshTarget = null;
-}
-
-// One deadline belongs to the visible page. Loads restart it on completion;
-// hiding the document pauses the timer while retaining an overdue deadline.
-function schedulePageRefresh(page, loading) {
-  const seconds = currentRole ? Number($((currentRole === "account" ? "account-" : "") + "auto-refresh").value) : 0;
-  if (!page?.autoRefresh || !seconds || loading) {
-    clearPageRefresh();
-    return;
-  }
-  if (pageRefreshTarget?.page !== page || pageRefreshTarget.generation !== sessionGeneration || pageRefreshTarget.seconds !== seconds) {
-    clearPageRefresh();
-    pageRefreshTarget = { page, generation: sessionGeneration, seconds, dueAt: Date.now() + seconds * 1000 };
-  }
-  if (document.visibilityState !== "visible") {
-    clearTimeout(pageRefreshTimer);
-    pageRefreshTimer = 0;
-    return;
-  }
-  if (pageRefreshTimer) return;
-  const target = pageRefreshTarget;
-  pageRefreshTimer = setTimeout(
-    () => {
-      clearPageRefresh();
-      if (currentPage() !== target.page || sessionGeneration !== target.generation || document.visibilityState !== "visible") {
-        updateRefreshControls();
-        return;
-      }
-      refreshPage();
+let selectedTab = initialRoute.tab;
+let credentialConcurrencyTimer = null;
+let credentialConcurrencyRefreshEpoch = 0;
+function activeTab() { return selectedTab; }
+function scheduleCredentialConcurrencyRefresh(immediate = false) {
+  clearTimeout(credentialConcurrencyTimer);
+  credentialConcurrencyTimer = null;
+  const epoch = ++credentialConcurrencyRefreshEpoch;
+  if (!currentRole || activeTab() !== "auth-files" || document.hidden) return;
+  credentialConcurrencyTimer = setTimeout(
+    async () => {
+      credentialConcurrencyTimer = null;
+      await guard(() => readCredentialConcurrency(true));
+      if (epoch === credentialConcurrencyRefreshEpoch) scheduleCredentialConcurrencyRefresh();
     },
-    Math.max(0, target.dueAt - Date.now())
+    immediate ? 0 : 3000
   );
 }
-
+document.addEventListener("visibilitychange", () => scheduleCredentialConcurrencyRefresh(true));
 function updateRefreshControls() {
-  const page = currentPage();
-  const loading = pendingPageLoads(page).length > 0;
-  const label = currentRole
-    ? document.querySelector(currentRole === "account" ? "[data-account-tab].active" : "[data-tab].active")?.textContent.trim()
-    : "";
-  for (const button of document.querySelectorAll('[data-page-action="refresh"]')) {
-    button.disabled = loading;
-    setTextAttribute(
-      button,
-      "data-tip",
-      setTextAttribute(button, "aria-label", label ? m("ui.refresh_value", { v0: label }) : m("ui.refresh"))
-    );
+  const loading =
+    !!authFilesQueries.admin.task || !!aiProvidersQuery.task || !!credentialConcurrencyQuery.task ||
+    Object.values(diagnostics).some((item) => item.loading);
+  document.querySelectorAll('[data-page-action="refresh"]').forEach((button) => (button.disabled = loading));
+}
+function privacyMasked() { return document.body.classList.contains("privacy-masked"); }
+function schedulePageTabLayout() {
+  requestAnimationFrame(() => {
+    const row = document.querySelector(".page-navigation");
+    const switcher = row.querySelector(".page-tab-switcher");
+    row.classList.toggle("compact", switcher.querySelector(".tabs").scrollWidth > switcher.clientWidth + 1);
+  });
+}
+function setAdminTab(name) {
+  selectedTab = ADMIN_TAB_IDS.includes(name) ? name : "auth-files";
+  writePageRoute("admin", selectedTab);
+  for (const tab of document.querySelectorAll("[data-tab]")) {
+    const active = tab.dataset.tab === selectedTab;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-current", active ? "page" : "false");
   }
-  schedulePageRefresh(page, loading);
+  $("page-tab-select").value = selectedTab;
+  const visible = selectedTab === "settings" ? ["concurrency", "location", "plugin-logs"] : [selectedTab];
+  for (const section of document.querySelectorAll('#app > section[id^="tab-"]'))
+    section.classList.toggle("hidden", !visible.includes(section.id.slice(4)));
+  schedulePageTabLayout();
+  renderPage();
+  scheduleCredentialConcurrencyRefresh();
 }
-
-function refreshPage() {
-  const page = currentPage();
-  if (!page) return Promise.resolve();
-  const pending = pendingPageLoads(page);
-  return guard(() => (pending.length ? settleLoads(pending) : loadPage(currentRole === "account", { reload: true })));
-}
-
-function refreshStalePage() {
-  if (currentPage()?.sources.some((source) => source.readAt && Date.now() - source.readAt >= PAGE_STALE_MS)) return refreshPage();
-}
-
-for (const role of ["admin", "account"]) {
-  const select = $((role === "account" ? "account-" : "") + "auto-refresh");
-  select.replaceChildren(
-    ...PAGE_REFRESH_INTERVALS.map((seconds) =>
-      el("option", {
-        value: String(seconds),
-        text: seconds ? m("ui.auto_refresh_every", { v0: seconds < 60 ? seconds + "s" : seconds / 60 + "m" }) : m("ui.auto_refresh_off")
-      })
-    )
-  );
-  select.onchange = () => {
-    saveChoice(role, select.id);
-    updateRefreshControls();
-  };
-}
-
-for (const button of document.querySelectorAll('[data-page-action="refresh"]')) {
-  setActionIcon(button, "refresh", m("ui.refresh"));
-  button.onclick = () => refreshPage();
-}
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") refreshStalePage();
-  updateRefreshControls();
-});
-
-async function setLoginMode(mode, preserveError) {
-  const ticket = ++loginModeRequest;
-  loginMode = mode === "account" ? "account" : "admin";
-  const route = pageRoute();
-  const tab = route.role === loginMode ? route.tab : loginMode === "account" ? "subscription" : "keys";
-  writePageRoute(loginMode, tab);
-  const account = loginMode === "account";
-  setText(document.querySelector("title"), m(account ? "ui.api_key_usage" : "ui.api_key_billing"));
-  $("gate-mode-admin").classList.toggle("active", !account);
-  $("gate-mode-admin").setAttribute("aria-selected", String(!account));
-  $("gate-mode-account").classList.toggle("active", account);
-  $("gate-mode-account").setAttribute("aria-selected", String(account));
-  setText($("gate-key-label"), account ? "API Key" : m("ui.management_key"));
-  $("gate-username").value = account ? "api-key" : "administrator";
-  setTextAttribute($("gate-key"), "placeholder", account ? m("ui.enter_api_key") : m("ui.enter_management_key"));
-  setText($("gate-submit"), account ? m("ui.view_my_usage") : m("ui.open_management_console"));
-  $("gate-key").value = "";
-  if (!preserveError) {
-    setText($("gate-error"), "");
-    $("gate-error").className = "notice err";
-  }
-  const saved = await recalledCredential(loginMode);
-  if (ticket !== loginModeRequest) return;
-  if (saved) setTextAttribute($("gate-key"), "placeholder", m("ui.key_remembered"));
-  $("gate-remember").checked = !!saved;
-}
-
-function showGate(mode, error) {
+function showGate(_mode, error) {
   sessionGeneration++;
-  hideNotice();
-  closeHoverTooltip();
-  try { sessionStorage.removeItem(SESSION_CREDENTIAL_PREFIX + mode); } catch (_) {}
-  for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
   for (const controller of activeRequests) controller.abort();
+  for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
+  closeHoverTooltip();
+  hideNotice();
   if (currentRole) {
-    clearCredentialScope(currentRole === "account");
-    resetRoleData(currentRole);
+    clearCredentialScope();
+    resetRoleData();
   }
   authKey = "";
   currentRole = "";
-  updateRefreshControls();
-  document.body.classList.remove("privacy-masked");
+  savedConcurrencySettings = null;
+  updateConcurrencyControls();
+  scheduleCredentialConcurrencyRefresh();
+  try { sessionStorage.removeItem(SESSION_CREDENTIAL_PREFIX + "admin"); } catch (_) {}
   $("app").classList.add("hidden");
-  $("account-app").classList.add("hidden");
   $("gate").classList.remove("hidden");
-  const box = $("gate-error");
-  setText(box, error || "");
-  box.className = error ? "notice err show" : "notice err";
-  setLoginMode(mode, true);
+  setText($("gate-error"), error || "");
+  $("gate-error").className = error ? "notice err show" : "notice err";
+  $("gate-key").value = "";
+  recalledCredential("admin").then((saved) => {
+    $("gate-remember").checked = !!saved;
+    setTextAttribute($("gate-key"), "placeholder", m(saved ? "ui.key_remembered" : "ui.enter_management_key"));
+  });
 }
-
-async function submitLogin() {
-  const role = loginMode;
+async function startAdmin(key) {
+  authKey = key;
+  currentRole = "admin";
   const generation = sessionGeneration;
-  let key = $("gate-key").value.trim();
-  if (!key) key = await recalledCredential(role);
+  await loadLocationSettings();
+  await activateCredentialScope(key);
+  if (generation !== sessionGeneration) throw new StaleRequestError();
+  restoreRolePreferences();
+  setAdminTab(pageRoute().tab);
+  $("gate").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  schedulePageTabLayout();
+  await loadPage();
+}
+async function submitLogin() {
+  const generation = sessionGeneration;
+  const key = $("gate-key").value.trim() || (await recalledCredential("admin"));
   if (!key) {
-    setText($("gate-error"), role === "account" ? m("ui.enter_an_api_key") : m("ui.enter_a_management_key"));
+    setText($("gate-error"), m("ui.enter_a_management_key"));
     $("gate-error").className = "notice err show";
     return;
   }
   $("gate-submit").disabled = true;
   try {
-    if (role === "account") await startAccount(key); else await startAdmin(key);
+    await startAdmin(key);
     if (generation !== sessionGeneration) return;
-    try { await saveCredential(role, key, $("gate-remember").checked); } catch (err) {
-      if (generation !== sessionGeneration) return;
-      const message = m("ui.signed_in_but_the_session_was_not_saved_value", { v0: err.message || err });
-      notify(message, "err");
+    try { await saveCredential("admin", key, $("gate-remember").checked); } catch (error) {
+      if (generation === sessionGeneration) notify(error.message, "err");
     }
     $("gate-key").value = "";
-  } catch (err) {
-    if (generation !== sessionGeneration || err instanceof StaleRequestError) return;
-    if (err instanceof AuthError) await fail(err); else showGate(role, m("ui.sign_in_failed_value", { v0: err.message || err }));
+  } catch (error) {
+    if (generation === sessionGeneration && !(error instanceof StaleRequestError)) showGate("admin", error.message);
   } finally { $("gate-submit").disabled = false; }
 }
-
 $("gate-form").onsubmit = (event) => {
   event.preventDefault();
-  submitLogin();
+  guard(submitLogin);
 };
-$("gate-mode-admin").onclick = () => setLoginMode("admin");
-$("gate-mode-account").onclick = () => setLoginMode("account");
-
-async function startAdmin(key) {
-  setText(document.querySelector("title"), m("ui.api_key_billing"));
-  const generation = sessionGeneration;
-  currentRole = "admin";
-  authKey = key;
-  await activateCredentialScope(false, key);
-  if (generation !== sessionGeneration) throw new StaleRequestError();
-  restoreRolePreferences("admin");
-  const route = pageRoute();
-  setAdminTab(route.role === "admin" ? route.tab : "keys");
-  $("gate").classList.add("hidden");
-  $("account-app").classList.add("hidden");
-  $("app").classList.remove("hidden");
-  schedulePageTabLayout();
-  await loadPage(false).catch(fail);
-}
-
-async function startAccount(key) {
-  setText(document.querySelector("title"), m("ui.api_key_usage"));
-  const generation = sessionGeneration;
-  currentRole = "account";
-  authKey = key;
-  // CLIProxyAPI remains authoritative for whether this downstream key is
-  // currently valid. The plugin endpoint only uses the key to select its hash.
-  resources.account.models.value = await fetchModels(true, key);
-  await activateCredentialScope(true, key);
-  if (generation !== sessionGeneration) throw new StaleRequestError();
-  restoreRolePreferences("account");
-  $("gate").classList.add("hidden");
-  $("app").classList.add("hidden");
-  $("account-app").classList.remove("hidden");
-  setText($("account-identity"), previewCredential(key));
-  const route = pageRoute();
-  setAccountTab(route.role === "account" ? route.tab : "subscription");
-  await loadPage(true).catch(fail);
-  schedulePageTabLayout();
-}
-
-function restoreRolePreferences(role) {
-  const account = role === "account";
-  const prefix = account ? "account-" : "";
-  // Dynamic choices must exist before the first filtered request, even
-  // when the current result no longer contains the stored selection.
-  for (const id of ["request-event-model", "request-event-source", "error-model", "error-source", "error-type"])
-    restoreChoice(role, prefix + id, "", true);
-  restoreChoice(role, prefix + "request-event-status", "");
-  restoreChoice(role, prefix + "auth-enabled-only", true);
-  restoreChoice(role, prefix + "auth-provider", "");
-  restoreChoice(role, prefix + "auto-refresh", "0");
-  setPrivacyMask(role, viewPreference(role, prefix + "privacy-mask", false));
-  if (!account) {
-    restoreChoice(role, "analysis-key", "", true);
-    if ($("analysis-key").value === UNASSIGNED_KEY) $("analysis-key").selectedOptions[0].textContent = m("ui.unassigned");
-    restoreChoice(role, "keys-include-deleted", false);
-    restoreChoice(role, "auth-quota-estimate", false);
-    restoreChoice(role, "ai-provider-enabled-only", true);
-    restoreChoice(role, "ai-provider-type", "");
-    restoreChoice(role, "plugin-log-level", "all");
-  }
-  sharedTimeRanges[role] = storedTimeRange(role);
-  const range = sharedTimeRanges[role];
-  const rolling = rollingTimeMode(range.mode);
-  sharedTimeChoices[role] = { hour: 8, day: 7, custom: range.mode === "custom" ? range : null };
-  if (rolling) sharedTimeChoices[role][rolling.unit] = rolling.value;
-  const defaultDimension = account ? "models" : "api_keys";
-  const dimension = viewPreference(role, "analysis-dimension", defaultDimension);
-  const allowedDimensions = account ? ["models", "sources"] : ["api_keys", "models", "sources"];
-  analysisDimensions[role] = allowedDimensions.includes(dimension) ? dimension : defaultDimension;
-  const metric = viewPreference(role, "analysis-metric", "total_tokens");
-  analysisMetrics[role] = Object.hasOwn(DISTRIBUTION_METRICS, metric) ? metric : "total_tokens";
-  updateSharedTimeControl(account);
-  updateFilterClearButton($(prefix + "request-events-filter-clear"));
-  updateFilterClearButton($(prefix + "errors-filter-clear"));
-}
-
-function resetRoleControls(role) {
-  const account = role === "account";
-  const prefix = account ? "account-" : "";
-  closeSharedTimePopover(account);
-  setPrivacyMask(role, false);
-  $(prefix + "auth-search").value = "";
-  if (!account) {
-    $("key-filter").value = "";
-    $("ai-provider-search").value = "";
-    $("keys-include-deleted").checked = false;
-    $("price-filter").value = "";
-    $("plugin-log-filter").value = "";
-  }
-}
-
-function resetRoleData(role) {
-  const account = role === "account";
-  destroyAnalysisCharts(account);
-  speedModels[role] = "";
-  if (role === "account") accountUIState = emptyAuthQuotaState();
-  else {
-    $("route-picker").close();
-    adminUIState = emptyAdminUIState();
-    expandedPluginLogIDs.clear();
-    resourceGroups.admin.configuration.syncErrors = [];
-    keyDirectory.clear();
-  }
-  for (const entry of Object.values(resources[role])) Object.assign(entry, { value: null, error: "", readAt: 0 });
-  for (const group of Object.values(resourceGroups[role])) group.task = null;
-  for (const page of Object.values(pages[role])) {
-    page.task = null;
-    for (const section of page.sections) section.displayed = null;
-  }
-  analysisQueries[role].clear();
-  speedQueries[role].clear();
-  authFilesQueries[role].clear();
-  if (!account) {
-    aiProvidersQuery.clear();
-    eventKeysQuery.clear();
-  }
-  for (const list of Object.values(pagedLists[role])) list.reset();
-  resetRoleControls(role);
-}
-
-function privacyMasked() { return document.body.classList.contains("privacy-masked"); }
-
-function privacyMaskButton(role) { return $((role === "account" ? "account-" : "") + "privacy-mask"); }
-
-function setPrivacyMask(role, masked) {
-  const button = privacyMaskButton(role);
-  button.setAttribute("aria-pressed", String(masked));
-  button.replaceChildren(actionIcon(masked ? "eye-off" : "eye"));
-  setTextAttribute(button, "aria-label", m("ui.mask"));
-  document.body.classList.toggle("privacy-masked", masked);
-}
-
-function activeTab(account) {
-  return account ? accountTab : document.querySelector(".tabs button[data-tab].active")?.dataset.tab || "keys";
-}
-
-const PAGE_TAB_ROWS = Array.from(document.querySelectorAll(".page-tabs-row"));
-let tabLayoutFrame = 0;
-
-// The select stands in for the tab bar when the tabs do not fit; it mirrors their labels and active tab.
-for (const row of PAGE_TAB_ROWS) {
-  const select = row.querySelector(".page-tab-select > select");
-  const tabs = Array.from(row.querySelectorAll(".tabs > button"));
-  const tabName = (button) => button.dataset.tab || button.dataset.accountTab;
-  select.replaceChildren(...tabs.map((button) => el("option", { value: tabName(button) }, window.billingI18n.boundText(button))));
-  select.onchange = () => {
-    tabs.find((button) => tabName(button) === select.value).click();
-    // A refused switch leaves the previous tab active.
-    select.value = tabName(tabs.find((button) => button.classList.contains("active")));
-  };
-}
-
-function updatePageTabLayouts() {
-  tabLayoutFrame = 0;
-  for (const row of PAGE_TAB_ROWS) {
-    if (!row.getClientRects().length) continue;
-    const switcher = row.querySelector(".page-tab-switcher");
-    const tabBar = switcher.querySelector(".tabs");
-    const select = switcher.querySelector("select");
-    const compact = tabBar.scrollWidth > switcher.clientWidth + 1;
-    const focusedTab = tabBar.contains(document.activeElement);
-    const focusedSelect = document.activeElement === select;
-    row.querySelector(".page-navigation").classList.toggle("compact", compact);
-    // Keyboard focus moves to whichever control is now shown.
-    if (compact && focusedTab) select.focus({ preventScroll: true });
-    if (!compact && focusedSelect) tabBar.querySelector(".active").focus({ preventScroll: true });
-    const actions = row.querySelector(".page-tab-actions");
-    const hasControls = Array.from(actions.children).some((node) => !node.classList.contains("hidden"));
-    actions.classList.toggle("hidden", !hasControls);
-    const card = Array.from(row.parentElement.querySelectorAll(".event-list-card")).find((card) => card.getClientRects().length);
-    if (card) row.parentElement.style.setProperty("--event-list-top", card.getBoundingClientRect().top + scrollY + "px");
-    positionSharedTimePopover(!!row.closest("#account-app"));
-  }
-}
-
-function schedulePageTabLayout() {
-  if (tabLayoutFrame) return;
-  tabLayoutFrame = requestAnimationFrame(updatePageTabLayouts);
-}
-
-addEventListener("resize", schedulePageTabLayout);
-const pageTabResizeObserver = new ResizeObserver(schedulePageTabLayout);
-for (const element of document.querySelectorAll(".head, #admin-data-status, #account-data-status, .page-tabs-row, .page-tabs-row .tabs")) {
-  pageTabResizeObserver.observe(element, { box: "border-box" });
-}
-
-function updatePageControls(account, page) {
-  const prefix = account ? "account-" : "";
-  const actions = $(prefix + "page-tab-actions");
-  const keyed = !account && page.sources.includes(eventKeysQuery);
-  actions.dataset.page = activeTab(account);
-  actions.classList.toggle("has-key-filter", keyed);
-  $(prefix + "shared-time-filter").classList.toggle("hidden", !page.timeRange);
-  $(prefix + "auto-refresh-control").classList.toggle("hidden", !page.autoRefresh);
-  $(prefix + "events-export").classList.toggle("hidden", !page.exportEvents);
-  if (!account) $("shared-key-filter").classList.toggle("hidden", !keyed);
-  if (!page.timeRange) closeSharedTimePopover(account);
-  updateRefreshControls();
-  schedulePageTabLayout();
-}
-
-function setAccountTab(tab) {
-  accountTab = ACCOUNT_TAB_IDS.includes(tab) ? tab : "subscription";
-  writePageRoute("account", accountTab);
-  document.querySelectorAll("[data-account-tab]").forEach((button) => {
-    const active = button.dataset.accountTab === accountTab;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-current", active ? "page" : "false");
-  });
-  $("account-page-tab-select").value = accountTab;
-  for (const name of ACCOUNT_TAB_IDS) { $("account-tab-" + name).classList.toggle("hidden", name !== accountTab); }
-  updatePageControls(true, pages.account[accountTab]);
-}
-
-const TABS = Array.from(document.querySelectorAll(".tabs button[data-tab]"));
-function setAdminTab(name) {
-  if (editors.get($("route-picker"))?.saving) return;
-  const selected = ADMIN_TAB_IDS.includes(name) ? name : "keys";
-  if (selected !== "keys") $("route-picker").close();
-  writePageRoute("admin", selected);
-  for (const tab of TABS) {
-    const active = tab.dataset.tab === selected;
-    tab.classList.toggle("active", active);
-    tab.setAttribute("aria-current", active ? "page" : "false");
-  }
-  $("page-tab-select").value = selected;
-  const visible = selected === "settings" ? new Set(["plans", "routes", "prices", "plugin-logs"]) : new Set([selected]);
-  for (const section of document.querySelectorAll('#app > section[id^="tab-"]')) {
-    section.classList.toggle("hidden", !visible.has(section.id.slice("tab-".length)));
-  }
-  updatePageControls(false, pages.admin[selected]);
-}
-for (const tab of TABS)
+const tabs = [...document.querySelectorAll("[data-tab]")];
+$("page-tab-select").replaceChildren(...tabs.map((tab) => el("option", { value: tab.dataset.tab }, window.billingI18n.boundText(tab))));
+$("page-tab-select").onchange = () => {
+  setAdminTab($("page-tab-select").value);
+  guard(() => loadPage());
+};
+for (const tab of tabs)
   tab.onclick = () => {
-    if (activeTab(false) === tab.dataset.tab) return;
     setAdminTab(tab.dataset.tab);
-    if (!refreshStalePage()) guard(() => loadPage(false));
+    guard(() => loadPage());
   };
-
-document.querySelectorAll("[data-account-tab]").forEach((button) => {
-  button.onclick = () => {
-    if (activeTab(true) === button.dataset.accountTab) return;
-    setAccountTab(button.dataset.accountTab);
-    if (!refreshStalePage()) guard(() => loadPage(true));
-  };
-});
-$("analysis-key").addEventListener("change", () =>
-  guard(() => {
-    saveChoice("admin", "analysis-key");
-    return loadPage(false);
-  })
-);
-
+for (const button of document.querySelectorAll('[data-page-action="refresh"]')) {
+  setActionIcon(button, "refresh", m("ui.refresh"));
+  button.onclick = () => guard(() => loadPage({ reload: true }));
+}
+$("privacy-mask").onclick = () => {
+  document.body.classList.toggle("privacy-masked");
+  $("privacy-mask").setAttribute("aria-pressed", String(privacyMasked()));
+};
+setActionIcon($("privacy-mask"), "eye-off", m("controls.privacy"));
+addEventListener("resize", schedulePageTabLayout);
+new ResizeObserver(schedulePageTabLayout).observe(document.querySelector(".page-tabs-row"));
 const THEME_MODES = {
   "": { icon: "sun-moon", label: () => m("ui.theme_follows_system") },
   white: { icon: "sun", label: () => m("ui.theme_light") },
@@ -445,29 +142,6 @@ function updateThemeButtons() {
   const mode = THEME_MODES[window.billingTheme?.preference()] || THEME_MODES[""];
   document.querySelectorAll('[data-page-action="theme"]').forEach((button) => setActionIcon(button, mode.icon, mode.label()));
 }
-
-function updateThemedVisuals() {
-  updateThemeButtons();
-  if (currentRole && activeTab(currentRole === "account") === "analysis") renderAnalysis(currentRole === "account");
-}
-
-document.querySelectorAll('[data-page-action="theme"]').forEach((button) => {
-  button.onclick = () => {
-    window.billingTheme?.cycle();
-    updateThemeButtons();
-  };
-});
-document.querySelectorAll('[data-page-action="logout"]').forEach((button) => {
-  setActionIcon(button, "logout", m("ui.sign_out"));
-  button.onclick = () =>
-    guard(async () => {
-      const role = currentRole || loginMode;
-      await deleteCredential(role);
-      const preference = viewPreferenceKey(role, (role === "account" ? "account-" : "") + "privacy-mask");
-      if (preference) { try { localStorage.removeItem(preference); } catch (_) {} }
-      showGate(role, "");
-    });
-});
 function addLanguageControl(group) {
   const menu = el("div", { class: "language-menu", popover: "auto", role: "menu", "aria-label": m("language.select") });
   const button = el(
@@ -523,49 +197,37 @@ function addLanguageControl(group) {
   group.prepend(button, menu);
 }
 document.querySelectorAll(".standalone-actions").forEach(addLanguageControl);
-
-window.addEventListener("billing-theme-change", updateThemedVisuals);
+for (const button of document.querySelectorAll('[data-page-action="theme"]'))
+  button.onclick = () => {
+    window.billingTheme.cycle();
+    updateThemeButtons();
+  };
+for (const button of document.querySelectorAll('[data-page-action="logout"]')) {
+  setActionIcon(button, "logout", m("ui.sign_out"));
+  button.onclick = () =>
+    guard(async () => {
+      await deleteCredential("admin");
+      showGate("admin", "");
+    });
+}
+window.addEventListener("billing-theme-change", updateThemeButtons);
 window.addEventListener("billing-language-change", () => {
-  dateFormatter = new Intl.DateTimeFormat(locale());
-  timeFormatter = new Intl.DateTimeFormat(locale(), { hour: "numeric", minute: "numeric", second: "numeric", hour12: false });
+  refreshBillingDateFormatters();
   updateThemeButtons();
-  updateSharedTimeControl(false);
-  updateSharedTimeControl(true);
   renderPage();
   schedulePageTabLayout();
 });
-
-for (const role of ["admin", "account"]) {
-  const button = privacyMaskButton(role);
-  setPrivacyMask(role, false);
-  button.onclick = () => {
-    setPrivacyMask(role, !privacyMasked());
-    saveViewPreference(role, button.id, privacyMasked());
-  };
-}
-
-(async function () {
-  const panelKey = readPanelKey();
+(async () => {
   document.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+    if (input.closest(".switch-control, .checkbox-control")) return;
     const placeholder = document.createTextNode("");
     input.replaceWith(placeholder);
     placeholder.replaceWith(input.getAttribute("role") === "switch" ? switchControl({ input }) : checkboxControl({ input }));
   });
-  document.querySelectorAll("[data-lucide-icon]")
-    .forEach((placeholder) => placeholder.replaceWith(actionIcon(placeholder.dataset.lucideIcon, placeholder.className)));
+  document.querySelectorAll("[data-lucide-icon]").forEach((node) => node.replaceWith(actionIcon(node.dataset.lucideIcon, node.className)));
   updateThemeButtons();
   try {
-    if (embedded && panelKey && initialRoute.role !== "account") {
-      await startAdmin(panelKey);
-      return;
-    }
-    const saved = await recalledCredential(loginMode, true);
-    if (!saved) {
-      showGate(loginMode, "");
-      return;
-    }
-    if (loginMode === "account") await startAccount(saved); else await startAdmin(saved);
-  } catch (err) {
-    if (err instanceof AuthError) await fail(err); else showGate(loginMode, m("ui.sign_in_failed_value", { v0: err.message || err }));
-  }
+    const key = (embedded && readPanelKey()) || (await recalledCredential("admin", true));
+    if (key) await startAdmin(key); else showGate("admin", "");
+  } catch (error) { showGate("admin", error.message); }
 })();

@@ -12,10 +12,10 @@ chmod 600 .env
 : "${CPA_BASE_URL:?Set CPA_BASE_URL in .env}"
 : "${CPA_MANAGEMENT_PASSWORD:?Set CPA_MANAGEMENT_PASSWORD in .env}"
 
-id=cpa-key-billing
+id=cpa-codex-controls
 service=cli-proxy-api
 version=$(sed -n 's/^[[:space:]]*Version[[:space:]]*= "\(.*\)"/\1/p' internal/plugin/types.go)
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Cannot determine the plugin version.' >&2; exit 1; }
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo 'Cannot determine the plugin version.' >&2; exit 1; }
 target=$id-v$version.so
 # Backups go beside the plugins/ directory, where the loader does not scan them.
 [[ /$CPA_REMOTE_PLUGIN_DIR/ == */plugins/* ]] || { echo 'CPA_REMOTE_PLUGIN_DIR must be inside a plugins/ directory.' >&2; exit 1; }

@@ -21,17 +21,6 @@ function el(tag, attrs, ...children) {
   return node;
 }
 
-function metricTag(metrics, title) {
-  return el(
-    "span",
-    { class: "tag plain metrics", title, "aria-label": title },
-    metrics.flatMap(([label, value], index) => [
-      index > 0 && el("span", { class: "tag-separator", text: DISPLAY_SEPARATOR, "aria-hidden": "true" }),
-      el("span", { class: "tag-metric" }, el("span", { class: "tag-label", text: label }), el("span", { class: "tag-value", text: value }))
-    ])
-  );
-}
-
 // Replace a display collection while retaining its scroll position.
 // Paged lists also use the returned row container to append new entries.
 function renderCollection(target, items, { render, headers, attrs, empty = m("ui.no_data") }) {
@@ -136,8 +125,7 @@ function openEditor(id, kind, initialize) {
   };
   editors.set(dialog, editor);
   try {
-    editor.data = kind ? editorData(kind) : undefined;
-    editor.initial = initialize(editor.data);
+    initialize();
     editor.notice.className = "editor-state notice hidden";
     updateEditorControls(editor);
     dialog.showModal();
@@ -171,7 +159,7 @@ async function submitEditor(id, save) {
   }
 }
 
-for (const id of ["plan-dialog", "route-dialog", "route-picker", "price-dialog", "action-dialog"]) {
+for (const id of ["action-dialog"]) {
   const dialog = $(id);
   dialog.querySelector(".dialog-actions button:not(.primary):not(.link)").onclick = () => dialog.close();
   dialog.addEventListener("cancel", (event) => { if (editors.get(dialog)?.saving) event.preventDefault(); });
@@ -439,88 +427,6 @@ function chipText(value) {
   if (value?.nodeType) return value.cloneNode(true);
   return displayText(window.billingI18n.isMessage(value) ? String(value) : value);
 }
-
-function settingsChipTooltip(item) {
-  return el(
-    "p",
-    { class: "hover-tooltip-body settings-chip-tooltip mono" },
-    item.iconName ? actionIcon(item.iconName) : null,
-    el("span", { class: item.state === "deny" ? "routing-deny" : "" }, chipText(item.text)),
-    item.tag ? el("span", { class: "tag warn", text: item.tag }) : null
-  );
-}
-
-function chipTooltipProps(item, label) {
-  return {
-    tabindex: "-1",
-    tooltip: () =>
-      label.scrollWidth > label.clientWidth + 1
-        ? [settingsChipTooltip(item)]
-        : item.hint ? [el("div", { class: "hover-tooltip-body", text: displayLabel(item.hint) })] : null
-  };
-}
-
-function settingsChipList(items, fallback) {
-  if (!items.length) return el("span", { class: fallback === "—" ? "muted" : "", text: fallback });
-  return el(
-    "div",
-    { class: "settings-chip-list" },
-    items.map((item) => {
-      const label = el("span", { class: "settings-chip-label" + (item.state === "deny" ? " routing-deny" : "") }, chipText(item.text));
-      return el(
-        "span",
-        { class: "settings-chip" + (item.tag ? " has-tag" : ""), ...chipTooltipProps(item, label) },
-        item.iconName ? actionIcon(item.iconName) : null,
-        label,
-        item.tag ? el("span", { class: "tag warn", text: item.tag }) : null
-      );
-    })
-  );
-}
-
-function settingsEntryField(label, content) {
-  return el(
-    "div",
-    { class: "settings-entry-field" },
-    el("span", { class: "settings-entry-label", text: displayLabel(label) }),
-    el("div", { class: "settings-entry-value" }, content)
-  );
-}
-
-function settingsCard(title, fields, onEdit, onDelete) {
-  return el(
-    "article",
-    { class: "inset-card settings-entry", role: "listitem" },
-    el(
-      "div",
-      { class: "settings-entry-header" },
-      el("div", { class: "settings-entry-title", text: displayLabel(title) }),
-      el(
-        "div",
-        { class: "row settings-entry-actions" },
-        el("button", { class: "link", text: m("ui.edit"), onclick: onEdit }),
-        el("button", { class: "link danger", text: m("ui.delete"), onclick: onDelete })
-      )
-    ),
-    el("div", { class: "settings-entry-fields" }, fields)
-  );
-}
-
-function boundKeyField(keys) {
-  const chips = keys.map((key) => ({ text: maskedText(apiKeyIdentity(key).text), tag: key.deleted_at ? m("ui.deleted") : "" }));
-  return settingsEntryField(m("ui.bound_keys"), settingsChipList(chips, "—"));
-}
-
-function bindingSummary(keys) {
-  const deleted = keys.filter((key) => key.deleted_at).length;
-  return m("ui.value_api_keysvalue", { v0: keys.length, v1: deleted ? m("ui.value_deleted", { v0: deleted }) : "" });
-}
-
-function selectedKeyScopes(id) {
-  return Array.from($(id).querySelectorAll('input[type="checkbox"]:checked:not(:disabled)'), (input) => input.value);
-}
-
-function sameScopes(left, right) { return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort()); }
 
 function renderDataPending(target, sources, message = m("ui.loading"), className = "empty") {
   const missing = sources.filter((source) => source.value === null);

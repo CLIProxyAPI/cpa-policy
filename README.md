@@ -1,174 +1,62 @@
-<div align="center">
-  <h1>CPA Key Billing</h1>
-  <p><strong><a href="https://github.com/router-for-me/CLIProxyAPI">CLIProxyAPI</a> 下游 API Key 计费与订阅额度插件。</strong></p>
-  <p>
-    <a href="https://github.com/haowang02/cpa-plugin-key-billing/releases/latest"><img src="https://img.shields.io/github/v/release/haowang02/cpa-plugin-key-billing?label=release" alt="Latest release"></a>
-    <a href="https://github.com/haowang02/cpa-plugin-key-billing/actions/workflows/check.yml"><img src="https://github.com/haowang02/cpa-plugin-key-billing/actions/workflows/check.yml/badge.svg" alt="CI status"></a>
-    <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platforms: Windows, macOS, and Linux">
-    <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
-  </p>
-  <p><a href="./README.en.md">English</a> · <strong>简体中文</strong></p>
-</div>
-<img src="images/example.png" alt="cpa-plugin-key-billing example" width="100%" />
+# CPA Policy
 
-## 功能特性
+源码仓库为 [CLIProxyAPI/cpa-policy](https://github.com/CLIProxyAPI/cpa-policy)，商店索引单独维护在 [CLIProxyAPI/Plugins-Store](https://github.com/CLIProxyAPI/Plugins-Store)。
 
-- 支持金额、Token、请求三种额度，可按 API Key 独立计时或按订阅计划统一周期重置
-- 支持按输入 Token 阈值切换长上下文**阶梯计价**
-- 支持按 API Key 设置**最大并发请求数**
-- 支持为每个 API Key 绑定**路由规则**，限制模型访问范围和上游凭证
-- 可从 [models.dev](https://models.dev/) 获取模型参考价
+基于 `haowang02/cpa-plugin-key-billing` 1.4.2 二次开发，当前版本 **1.4.2-timezone.14**。插件标识改为 **`cpa-codex-controls`**，与原计费插件独立；管理页面名称继续为「账号设置」。
 
-## 工作原理
+本版已删除 **API Key 管理及自助页面、分析、请求事件、订阅计划、路由规则、模型定价**，包括对应接口、计费/额度扣减、价格同步、调度器、存储代码和前端模块。不会再按插件原有订阅、价格或 API Key 规则拒绝请求。CPA 自身的访问密钥鉴权和上游供应商凭据仍由宿主管理。
 
-插件会在请求到达上游前检查订阅额度、并发和路由。上游调用结束后，CLIProxyAPI 通过 `usage.handle` 提供用量。插件据此记录请求事件、计算费用并更新周期消费额。
+保留的功能：
 
-```mermaid
----
-config:
-  themeVariables:
-    fontSize: "13px"
-  flowchart:
-    diagramPadding: 4
-    nodeSpacing: 20
-    rankSpacing: 28
-    padding: 3
----
-flowchart TB
-    A[下游请求] --> B["request.intercept_before<br/>模型 · 并发 · 额度"]
-    B -- 拒绝 --> R[返回 HTTP 403 / 429]
-    B -- 通过并占用并发槽 --> C["scheduler.pick<br/>选择路由允许的上游凭证"]
-    C -- 无可用凭证 --> S[返回 HTTP 503]
-    C -- 成功 --> D[CLIProxyAPI 调用上游模型]
-    D --> E["request.complete<br/>释放并发槽位"]
-    D --> F["usage.handle<br/>记录请求事件与用量"]
-    F --> G["归一化 Token 并计费<br/>更新周期消费额"]
+- **认证文件 / AI 供应商**：仅显示 Codex 类型的认证文件及 CPA `codex-api-key` 供应商，保留搜索、启用筛选、上游实时额度/余额查询，以及每行右侧「设置」按钮。
+- **并发策略**：账号单独设置并发上限，默认为 0，不限制也不排队；正数上限使用全局账号队列容量和排队超时。队列容量 0 表示超限直接拒绝。流式请求占用名额直至完成，一个供应商的多个上游密钥分别限制。
+- **时区覆盖**：默认关闭；账号单独设置优先于全局。账号单独关闭时跳过全局覆盖。支持通过该账号代理检测出口位置并填充国家、地区、城市和时区。
+- **错误事件、插件日志**：独立诊断数据库，分页浏览错误、日志等级筛选和清空日志。错误详情来自 CPA 的 `usage.handle`。
+- **管理页面**：管理密钥登录、中英文、主题、隐私遮罩及移动端布局。
+
+## 使用与安装
+
+在 CPA 插件商店中添加以下源即可安装当前版本：
+
+```text
+https://raw.githubusercontent.com/CLIProxyAPI/Plugins-Store/main/registry.json
 ```
 
-## 环境要求
+安装包和源码归档发布在本仓库的 [Releases](https://github.com/CLIProxyAPI/cpa-policy/releases)。详细配置、覆盖范围和限制见 [TIMEZONE.md](TIMEZONE.md)，安装和迁移见 [INSTALL.md](INSTALL.md)。当前尚未包含多供应商扩展、违禁内容检测或请求隐私过滤。
 
-- CLIProxyAPI `7.3.7` 或更高版本，建议使用最新版本
-- 使用支持插件的 CLIProxyAPI 构建，不要使用 no-plugin 版本
-
-## 安装
-
-### 商店安装
-
-CPA 管理面板（CPAMC 或 CPAMP）插件商店搜索 `cpa-key-billing`。
-
-### 人工安装
-
-在 CLIProxyAPI 根目录运行。macOS 和 Linux 使用：
+需要支持 schema 6 的插件版 CPA，已用于本地验证的版本是 7.3.7。构建要求 Go 1.24+ 和 C 编译器：
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/haowang02/cpa-plugin-key-billing/main/install.sh | sh
+CGO_ENABLED=1 go build -buildvcs=false -trimpath -ldflags='-s -w -X cpa-codex-controls/internal/plugin.GitHubRepository=https://github.com/CLIProxyAPI/cpa-policy' \
+  -tags cshared -buildmode=c-shared \
+  -o dist/cpa-codex-controls.so ./cmd/cpa-codex-controls
 ```
 
-Windows 请先停止 CLIProxyAPI，再在 PowerShell 中运行：
+macOS 将输出扩展名改为 `.dylib`。新安装：停止 CPA，把对应平台库放入 `plugins.dir`，在 `plugins.configs.cpa-codex-controls` 下设置 `enabled: true`，再启动 CPA。每个插件目录只保留一份此 ID 的可加载库。自建商店源或从旧定制版迁移见 [INSTALL.md](INSTALL.md)。
 
-```powershell
-irm https://raw.githubusercontent.com/haowang02/cpa-plugin-key-billing/main/install.ps1 | iex
+安装脚本使用 `CPA_PLUGIN_REPOSITORY=CLIProxyAPI/cpa-policy sh install.sh`，读取本仓库的 Release ZIP 和 `checksums.txt`。当前已验证的 .14 动态库保留构建时的仓库元数据占位值；商店下载来源由索引中的真实地址决定。后续 GitHub Release 构建会注入实际仓库地址。原作者链接只用于归属说明。
+
+## 旧数据
+
+旧 `state_file` 仅作为原计费数据库诊断历史的只读导入来源，默认空值，不自动读取其他插件的数据。需要导入时显式指定原文件，例如 `plugins/cpa-key-billing-state-v1.db`。只导入错误记录和插件日志到新的 `diagnostics_file`，默认 `plugins/cpa-codex-controls-diagnostics.db`；重启或重复配置不会重复导入。旧库内容保持不变，密钥、计划、价格、路由和成功请求不会复制到新库。旧诊断结构不兼容时导入回滚并报错。
+
+诊断记录按 30 天保留；过期记录不在新页面显示，旧库仍是完整原始归档。清空新库日志不会修改旧库，也不会在下次启动重新导入已清空日志。新旧库不能使用相同文件。
+
+旧 `routing`、`proxy_locations` 及已知计费配置字段仍可解析，但不再生效。旧定制版的 `custom_location`、`concurrency`、`credential_policies` 需要复制到新 ID 配置下；不会自动读取旧 ID 的配置。
+
+## 本地验证
+
+```sh
+gofmt -l .
+go vet ./...
+go test -race ./...
+go mod tidy -diff
+npm ci --prefix scripts
+npm test --prefix scripts
+node scripts/format_ui.mjs --check
+python3 scripts/frontend_dummy_backend.py --port 18766
+# 另一个终端：使用本地 CPA 和编译后的库，全部请求发往假上游
+python3 scripts/e2e_proxy_location.py --cpa /path/to/cli-proxy-api --plugin dist/cpa-codex-controls.so
 ```
 
-安装脚本会将插件安装到当前目录的 `plugins/`。安装或升级完成后需要重启 CLIProxyAPI。
-
-在 CLIProxyAPI 配置文件中加入：
-
-```yaml
-plugins:
-  enabled: true
-  dir: "plugins"
-  configs:
-    cpa-key-billing:
-      enabled: true
-      priority: 100 # 插件调度优先级，数值越大越优先
-      debug: false # 是否记录 debug 日志，例如路由日志、匹配参考价日志
-      codex_fast_mode_billing: false # 开启后，Codex 的 priority 请求按 2.5 倍计费
-      mask_api_key_view_emails: false # 对 API Key 查询页面返回的邮箱进行掩码脱敏
-      allow_api_key_quota_reset: false # 允许 API Key 用户重置可访问的 Codex 和 Claude 认证文件额度，消耗上游重置次数
-      state_file: "plugins/cpa-key-billing-state-v1.db"
-      routing:
-        strategy: "round-robin" # round-robin、weighted-round-robin、fill-first
-        session-affinity: false # 同一会话优先复用可用的上游凭证
-        session-affinity-ttl: "1h" # 会话绑定的空闲过期时间
-```
-
-路由规则对上游凭证设有限制时，插件按上述 `routing` 配置调度；其他请求由 CPA 调度。插件配置与 CPA 的全局调度配置相互独立。
-
-CPA 按插件优先级选择调度插件，不会依次调用。建议显式设置 `priority: 100`，使本插件优先参与调度；省略时使用 CPA 的默认值 `0`。无论由谁调度，所选凭证都必须符合 API Key 的路由规则；凭证不符合规则或无法完成校验时，请求返回 `503`，原因记录在插件日志中。
-
-首次调度或会话绑定失效时，插件按配置的策略，从优先级最高的可用凭证中选择。启用会话粘性后，同一会话优先复用已绑定的凭证；凭证不可用或会话空闲时间超过 `session-affinity-ttl` 后，重新选择凭证。会话标识由 CPA 提供，没有会话标识的请求按常规策略调度。
-
-> [!WARNING]
-> 升级前请备份数据文件。
->
-> - v1.0.0 至最新版本的数据库文件支持自动迁移。
-> - v0.8.4 及更早版本的 JSON 或 SQLite 数据文件不支持迁移，请将 `state_file` 指向新文件。
-
-重启 CLIProxyAPI 后，在管理中心打开「API Key Billing」。确认模型定价后，创建订阅计划并绑定需要限制的 API Key。
-
-## 页面访问
-
-管理员可以从 CLIProxyAPI 管理中心的「API Key Billing」菜单进入，也可以直接打开：
-
-```text
-http(s)://<CLIProxyAPI 地址>/v0/resource/plugins/cpa-key-billing/ui
-```
-
-普通用户使用自己的 API Key 查询订阅额度和用量时，直接打开：
-
-```text
-http(s)://<CLIProxyAPI 地址>/v0/resource/plugins/cpa-key-billing/ui#account
-```
-
-## 计费与订阅规则
-
-- 未绑定订阅计划的 API Key 只统计用量，不限制额度。
-- 订阅计划可设置多个自定义额度窗口，每个窗口可单独或组合限制金额、Token、请求数。
-- 每个 API Key 独立记账。独立周期从首次放行开始；统一周期可为各窗口指定下次开始时间，所有绑定 Key 按固定时间重置。
-- 手动重置额度时，统一周期的重置时间保持不变；独立周期在下一次放行时重新开始。
-- 自定义价优先于 models.dev 参考价，两者都没有时拒绝新请求。
-- 请求事件保留最近 365 天。
-
-## 路由规则
-
-在 API Key 页面绑定路由规则，也可直接选择模型、整类凭证或单个凭证。点击模型或凭证的选框，可在未选择、白名单（勾号）、黑名单（叉号）之间切换。整类凭证包含该类别后续新增的凭证，也可用黑名单排除其中的单个凭证。模型与凭证分别合并所有绑定规则和直接选择：白名单取并集，黑名单取并集，黑名单优先。白名单为空时允许全部，再排除黑名单。
-
-```mermaid
----
-config:
-  themeVariables:
-    fontSize: "13px"
-  flowchart:
-    diagramPadding: 4
-    nodeSpacing: 20
-    rankSpacing: 28
-    padding: 3
----
-flowchart TB
-    A["全部绑定路由<br/>＋ Key 直接选择"] --> M["模型黑白名单分别取并集<br/>白名单为空则不限，再排除黑名单"]
-    A --> C["凭证黑白名单分别取并集<br/>整类凭证 ＋ 单个凭证<br/>白名单为空则不限，再排除黑名单"]
-    M --> D{请求模型是否允许？}
-    D -- 否 --> R[返回 HTTP 403]
-    D -- 是 --> P["在 CPA 可用候选中<br/>按凭证权限选择上游"]
-    C --> P
-    P -- 有可用凭证 --> U[调用上游]
-    P -- 无可用凭证 --> S[返回 HTTP 503]
-```
-
-## 拦截请求的响应
-
-| 场景 | 状态码 | `type` | `code` |
-| --- | --- | --- | --- |
-| API Key 并发已满 | `429` | `rate_limit_error` | `rate_limit_exceeded` |
-| 订阅额度用尽 | `429` | `rate_limit_error` | `rate_limit_exceeded` |
-| 模型无权访问 | `403` | `permission_error` | `insufficient_quota` |
-| 没有符合规则且可用的凭证 | `503` | `server_error` | `internal_server_error` |
-| 选中的凭证不符合路由规则 | `503` | `server_error` | `routing_credential_mismatch` |
-| 无法校验所选凭证的路由权限 | `503` | `server_error` | `routing_credential_unverified` |
-| 已绑定的路由规则不存在或损坏 | `503` | `server_error` | `routing_configuration_error` |
-| 模型未定价 | `503` | `cpa_key_billing_error` | `model_price_error` |
-
-## 致谢
-
-- [LINUX DO](https://linux.do/) - 新的理想型社区
+前端演示使用 `demo-management-key`，数据仅保存在内存中。开发目录说明见 [AGENTS.md](AGENTS.md)；授权和参考实现归属见 [NOTICE](NOTICE) 与 `licenses/`。

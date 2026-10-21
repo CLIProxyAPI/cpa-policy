@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"cpa-key-billing/internal/messages"
+	"cpa-codex-controls/internal/messages"
 )
 
 const hostHTTPDo = "host.http.do"

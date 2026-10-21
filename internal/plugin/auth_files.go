@@ -14,8 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"cpa-key-billing/internal/billing"
-	"cpa-key-billing/internal/messages"
+	"cpa-codex-controls/internal/messages"
 )
 
 const (
@@ -55,19 +54,18 @@ type hostAuthFile struct {
 }
 
 type authFileView struct {
-	AuthIndex          string                       `json:"auth_index"`
-	Name               string                       `json:"name"`
-	Category           string                       `json:"category"`
-	Email              string                       `json:"email,omitempty"`
-	Disabled           bool                         `json:"disabled"`
-	Unavailable        bool                         `json:"unavailable"`
-	Priority           int                          `json:"priority"`
-	QuotaSupported     bool                         `json:"quota_supported"`
-	QuotaReason        string                       `json:"quota_unavailable_reason,omitempty"`
-	QuotaReasonMessage messages.Message             `json:"quota_unavailable_message,omitzero"`
-	CacheRevision      string                       `json:"cache_revision,omitempty"`
-	Usage              billing.CredentialUsageStats `json:"usage"`
-	Quota              *authQuotaResponse           `json:"quota,omitempty"`
+	AuthIndex          string             `json:"auth_index"`
+	Name               string             `json:"name"`
+	Category           string             `json:"category"`
+	Email              string             `json:"email,omitempty"`
+	Disabled           bool               `json:"disabled"`
+	Unavailable        bool               `json:"unavailable"`
+	Priority           int                `json:"priority"`
+	QuotaSupported     bool               `json:"quota_supported"`
+	QuotaReason        string             `json:"quota_unavailable_reason,omitempty"`
+	QuotaReasonMessage messages.Message   `json:"quota_unavailable_message,omitzero"`
+	CacheRevision      string             `json:"cache_revision,omitempty"`
+	Quota              *authQuotaResponse `json:"quota,omitempty"`
 }
 
 type authFileListResponse struct {
@@ -92,11 +90,8 @@ type quotaRow struct {
 	ObservedAt       time.Time        `json:"observed_at,omitzero"`
 	// LimitKey names the limit of a window that requests report; with the
 	// window's length it identifies the window from one report to the next.
-	LimitKey string `json:"limit_key,omitempty"`
-	// Usage is what CLIProxyAPI requests consumed in the window's current period.
-	Usage         *billing.QuotaPeriodUsage `json:"usage,omitempty"`
+	LimitKey      string `json:"limit_key,omitempty"`
 	windowSeconds int64
-	meter         *quotaMeter
 }
 
 type authQuotaResponse struct {
@@ -119,115 +114,55 @@ type resetCreditExpiry struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-func (a *App) authFiles(req ManagementRequest, access viewAccess) ManagementResponse {
-	if access.APIKey && !access.Tracked {
-		return apiKeyUnauthorized()
-	}
-	var from, to time.Time
-	if err := timeRangeParams(req.Query, &from, &to); err != nil {
-		return viewErrorResponse(access, err)
-	}
-	files, errList := a.listAuthFiles(access, from, to)
-	if errList != nil {
-		if billing.KindOf(errList) == billing.KindInvalid {
-			return viewErrorResponse(access, errList)
-		}
-		return viewDetailedError(access, http.StatusBadGateway, "host_unavailable", errList)
-	}
-	return viewJSON(access, http.StatusOK, authFileListResponse{Files: files})
-}
-
-func (a *App) authQuota(req ManagementRequest, access viewAccess) ManagementResponse {
-	if access.APIKey && !access.Tracked {
-		return apiKeyUnauthorized()
-	}
-	selected, failure := a.resolveQuotaAuthFile(req, access)
-	if selected == nil {
-		return failure
-	}
-	result, errQuota := a.fetchAuthQuota(req.HostCallbackID, *selected)
-	if errQuota != nil {
-		return viewDetailedError(access, http.StatusBadGateway, "quota_failed", errQuota)
-	}
-	credential := quotaCredential{selected.AuthIndex, authCategory(selected.Type)}
-	if errUsage := a.attachQuotaUsage(access.usageScope(), map[quotaCredential]*authQuotaResponse{credential: &result}); errUsage != nil {
-		return viewErrorResponse(access, errUsage)
-	}
-	return viewJSON(access, http.StatusOK, result)
-}
-
-func (a *App) authFileHistory(req ManagementRequest, access viewAccess) ManagementResponse {
-	if access.APIKey && !access.Tracked {
-		return apiKeyUnauthorized()
-	}
-	selected, failure := a.resolveAuthFile(req, access)
-	if selected == nil {
-		return failure
-	}
-	history, err := a.readAuthFileHistory(quotaCredential{selected.AuthIndex, authCategory(selected.Type)}, access.usageScope())
+func (a *App) authFiles(_ ManagementRequest) ManagementResponse {
+	files, err := a.listAuthFiles()
 	if err != nil {
-		return viewErrorResponse(access, err)
+		return jsonMessageError(502, "host_unavailable", messages.FromError(err))
 	}
-	return viewJSON(access, http.StatusOK, history)
+	return JSONResponse(200, authFileListResponse{Files: files})
+}
+
+func (a *App) authQuota(req ManagementRequest) ManagementResponse {
+	selected, failure := a.resolveQuotaAuthFile(req)
+	if selected == nil {
+		return failure
+	}
+	result, err := a.fetchAuthQuota(req.HostCallbackID, *selected)
+	if err != nil {
+		return jsonMessageError(502, "quota_failed", messages.FromError(err))
+	}
+	return JSONResponse(200, result)
 }
 
 // authFilePeriodModels breaks down by model a history period's usage, which
 // the request names by the period's usage query.
-func (a *App) authFilePeriodModels(req ManagementRequest, access viewAccess) ManagementResponse {
-	if access.APIKey && !access.Tracked {
-		return apiKeyUnauthorized()
-	}
-	selected, failure := a.resolveAuthFile(req, access)
-	if selected == nil {
-		return failure
-	}
-	period := billing.QuotaPeriod{AuthIndex: selected.AuthIndex, Provider: authCategory(selected.Type),
-		Models: billing.ModelMatch{Include: req.Query["include"], Exclude: req.Query["exclude"]}}
-	if err := timeRangeParams(req.Query, &period.Start, &period.End); err != nil {
-		return viewErrorResponse(access, err)
-	}
-	usage, err := a.store.QuotaPeriodUsage(access.usageScope(), []billing.QuotaPeriod{period}, true)
-	if err != nil {
-		return viewErrorResponse(access, err)
-	}
-	return viewJSON(access, http.StatusOK, map[string][]billing.ModelUsage{"models": append([]billing.ModelUsage{}, usage[0].Models...)})
-}
 
-// Resource routes are GET-only. Require a reset ID header and preserve it on retries.
-func (a *App) authQuotaReset(req ManagementRequest, access viewAccess) ManagementResponse {
-	if access.APIKey && !access.Tracked {
-		return apiKeyUnauthorized()
-	}
-	if access.APIKey && !a.store.AllowAPIKeyQuotaReset() {
-		return viewJSONError(access, http.StatusForbidden, "forbidden", "Quota resets are disabled for API key users")
-	}
+// Require a reset ID header and preserve it on retries.
+func (a *App) authQuotaReset(req ManagementRequest) ManagementResponse {
 	resetID := req.Headers.Get("X-Quota-Reset-ID")
 	if !quotaResetIDPattern.MatchString(resetID) {
-		return viewJSONError(access, http.StatusBadRequest, "invalid", "Invalid quota reset request ID")
+		return JSONError(http.StatusBadRequest, "invalid", "Invalid quota reset request ID")
 	}
-	selected, failure := a.resolveQuotaAuthFile(req, access)
+	selected, failure := a.resolveQuotaAuthFile(req)
 	if selected == nil {
 		return failure
 	}
 	if category := authCategory(selected.Type); category != "codex" && category != "claude" {
-		return viewJSONError(access, http.StatusUnprocessableEntity, "unsupported", "Quota resets are not supported for this auth file type")
+		return JSONError(http.StatusUnprocessableEntity, "unsupported", "Quota resets are not supported for this auth file type")
 	}
 	name := selected.Name
-	if access.APIKey && access.MaskEmails {
-		name = maskEmails(name)
-	}
 	if !req.Query.Has("auth_revision") || req.Query.Get("auth_revision") != authFileRevision(*selected) || req.Query.Get("auth_name") != name {
-		return viewJSONError(access, http.StatusConflict, "auth_file_changed", "Auth file changed; refresh the auth file list and try again")
+		return JSONError(http.StatusConflict, "auth_file_changed", "Auth file changed; refresh the auth file list and try again")
 	}
 	cleared, errReset := a.resetAuthQuota(req.HostCallbackID, *selected, resetID)
 	if errReset != nil {
-		return viewDetailedError(access, http.StatusBadGateway, "reset_failed", errReset)
+		return jsonMessageError(http.StatusBadGateway, "reset_failed", messages.FromError(errReset))
 	}
-	return viewJSON(access, http.StatusOK, map[string]bool{"reset": true, "cooldown_cleared": cleared})
+	return JSONResponse(http.StatusOK, map[string]bool{"reset": true, "cooldown_cleared": cleared})
 }
 
-func (a *App) resolveQuotaAuthFile(req ManagementRequest, access viewAccess) (*hostAuthFile, ManagementResponse) {
-	selected, failure := a.resolveAuthFile(req, access)
+func (a *App) resolveQuotaAuthFile(req ManagementRequest) (*hostAuthFile, ManagementResponse) {
+	selected, failure := a.resolveAuthFile(req)
 	if selected == nil {
 		return nil, failure
 	}
@@ -236,51 +171,31 @@ func (a *App) resolveQuotaAuthFile(req ManagementRequest, access viewAccess) (*h
 		if selected.Disabled {
 			code = "disabled"
 		}
-		return nil, viewJSONError(access, http.StatusUnprocessableEntity, code, reason)
+		return nil, JSONError(http.StatusUnprocessableEntity, code, reason)
 	}
 	return selected, ManagementResponse{}
 }
 
 // resolveAuthFile finds the auth file a request names, among those the caller may see.
-func (a *App) resolveAuthFile(req ManagementRequest, access viewAccess) (*hostAuthFile, ManagementResponse) {
-	authIndex := strings.TrimSpace(req.Query.Get("auth_index"))
-	if authIndex == "" || len(authIndex) > 512 {
-		return nil, viewJSONError(access, http.StatusBadRequest, "invalid", "Invalid auth file identifier")
+func (a *App) resolveAuthFile(req ManagementRequest) (*hostAuthFile, ManagementResponse) {
+	index := strings.TrimSpace(req.Query.Get("auth_index"))
+	if index == "" || len(index) > 512 {
+		return nil, JSONError(400, "invalid", "Invalid auth file identifier")
 	}
-	selected, errList := a.findAuthFile(authIndex)
-	if errList != nil {
-		return nil, viewDetailedError(access, http.StatusBadGateway, "host_unavailable", errList)
+	selected, err := a.findAuthFile(index)
+	if err != nil {
+		return nil, jsonMessageError(502, "host_unavailable", messages.FromError(err))
 	}
 	if selected == nil {
-		return nil, viewJSONError(access, http.StatusNotFound, "not_found", "Auth file does not exist")
-	}
-	if access.APIKey {
-		decision := a.store.ResolveRouting(access.Scope, "", "")
-		if decision.ConfigurationError != "" || (decision.RestrictsCredentials() && !routingAllowsAuthFile(*selected, decision)) {
-			return nil, viewJSONError(access, http.StatusNotFound, "not_found", "Auth file does not exist")
-		}
+		return nil, JSONError(404, "not_found", "Auth file does not exist")
 	}
 	return selected, ManagementResponse{}
 }
 
-func (a *App) listAuthFiles(access viewAccess, from, to time.Time) ([]authFileView, error) {
+func (a *App) listAuthFiles() ([]authFileView, error) {
 	files, errList := a.listHostAuthFiles()
 	if errList != nil {
 		return nil, errList
-	}
-	if access.APIKey {
-		decision := a.store.ResolveRouting(access.Scope, "", "")
-		if decision.ConfigurationError != "" {
-			files = nil
-		} else if decision.RestrictsCredentials() {
-			filtered := files[:0]
-			for _, file := range files {
-				if routingAllowsAuthFile(file, decision) {
-					filtered = append(filtered, file)
-				}
-			}
-			files = filtered
-		}
 	}
 	views := make([]authFileView, 0, len(files))
 	for _, file := range files {
@@ -290,35 +205,11 @@ func (a *App) listAuthFiles(access viewAccess, from, to time.Time) ([]authFileVi
 		category := authCategory(file.Type)
 		quotaSupported, quotaReason := authQuotaAvailability(file, category)
 		views = append(views, authFileView{
-			AuthIndex: file.AuthIndex, Name: file.Name, Category: category, Email: cleanText(file.Email),
+			AuthIndex: file.AuthIndex, Name: file.Name, Category: category, Email: strings.TrimSpace(file.Email),
 			Disabled: file.Disabled, Unavailable: file.Unavailable, Priority: file.Priority,
 			QuotaSupported: quotaSupported, QuotaReason: quotaReason, CacheRevision: authFileRevision(file),
 			QuotaReasonMessage: messages.Literal(quotaReason),
 		})
-	}
-	indexes := make([]string, len(views))
-	for i := range views {
-		indexes[i] = views[i].AuthIndex
-	}
-	usage, errUsage := a.store.CredentialUsageStats(indexes, access.usageScope(), from, to)
-	if errUsage != nil {
-		return nil, errUsage
-	}
-	// Older reports describe no window that is still current.
-	headers, errHeaders := a.store.LatestQuotaHeaders(indexes, a.store.Now().Add(-quotaHistoryRange-quotaHistoryLookback))
-	if errHeaders != nil {
-		return nil, errHeaders
-	}
-	quotas := make(map[quotaCredential]*authQuotaResponse)
-	for i := range views {
-		views[i].Usage = usage[views[i].AuthIndex]
-		views[i].Quota = observedAuthQuota(views[i].Category, views[i].CacheRevision, headers[views[i].AuthIndex])
-		if views[i].Quota != nil {
-			quotas[quotaCredential{views[i].AuthIndex, views[i].Category}] = views[i].Quota
-		}
-	}
-	if errUsage := a.attachQuotaUsage(access.usageScope(), quotas); errUsage != nil {
-		return nil, errUsage
 	}
 	sort.SliceStable(views, func(i, j int) bool {
 		left, right := authCategoryOrder(views[i].Category), authCategoryOrder(views[j].Category)
@@ -841,7 +732,6 @@ type quotaWindow struct {
 	Seconds          int64
 	RemainingPercent *float64
 	ResetAt          string
-	meter            *quotaMeter
 }
 
 func appendCodexRateLimit(result *authQuotaResponse, limit codexLimit, info map[string]any) {
@@ -855,7 +745,7 @@ func appendCodexRateLimit(result *authQuotaResponse, limit codexLimit, info map[
 			continue
 		}
 		seconds, _ := intValue(value, "limit_window_seconds", "limitWindowSeconds")
-		window := quotaWindow{Role: role, Seconds: seconds, meter: limit.meter()}
+		window := quotaWindow{Role: role, Seconds: seconds}
 		if used, ok := floatValue(value, "used_percent", "usedPercent"); ok {
 			window.RemainingPercent = remainingPercent(100 - used)
 		} else if hasReached && reached || hasAllowed && !allowed {
@@ -892,7 +782,7 @@ func appendQuotaWindows(result *authQuotaResponse, limitKey, labelPrefix string,
 		}
 		result.Quota = append(result.Quota, quotaRow{Label: labelPrefix + label,
 			LabelMessage: messages.Literal(label), LabelPrefix: labelPrefix, LimitKey: limitKey,
-			RemainingPercent: window.RemainingPercent, ResetAt: window.ResetAt, windowSeconds: window.Seconds, meter: window.meter})
+			RemainingPercent: window.RemainingPercent, ResetAt: window.ResetAt, windowSeconds: window.Seconds})
 	}
 }
 
@@ -946,15 +836,14 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 	for _, window := range []struct {
 		key, label, limit string
 		seconds           int64
-		meter             *quotaMeter
 	}{
-		{"five_hour", "5-hour limit", claudeUnifiedLimit, fiveHours, &quotaMeter{}},
-		{"seven_day", "Weekly limit", claudeUnifiedLimit, week, &quotaMeter{}},
-		{"seven_day_oauth_apps", "OAuth Apps weekly limit", "", week, nil},
-		{"seven_day_opus", "Opus weekly limit", "", week, claudeModelMeter("opus")},
-		{"seven_day_sonnet", "Sonnet weekly limit", "", week, claudeModelMeter("sonnet")},
-		{"seven_day_cowork", "Cowork weekly limit", "", week, nil},
-		{"iguana_necktie", "Iguana Necktie", "", 0, nil},
+		{"five_hour", "5-hour limit", claudeUnifiedLimit, fiveHours},
+		{"seven_day", "Weekly limit", claudeUnifiedLimit, week},
+		{"seven_day_oauth_apps", "OAuth Apps weekly limit", "", week},
+		{"seven_day_opus", "Opus weekly limit", "", week},
+		{"seven_day_sonnet", "Sonnet weekly limit", "", week},
+		{"seven_day_cowork", "Cowork weekly limit", "", week},
+		{"iguana_necktie", "Iguana Necktie", "", 0},
 	} {
 		if window.key == "iguana_necktie" && fable != nil {
 			continue
@@ -964,7 +853,7 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 			continue
 		}
 		row := quotaRow{Label: window.label, LabelMessage: messages.Literal(window.label), ResetAt: quotaResetAt(firstString(value, "resets_at", "resetsAt")),
-			LimitKey: window.limit, windowSeconds: window.seconds, meter: window.meter}
+			LimitKey: window.limit, windowSeconds: window.seconds}
 		if percent, ok := floatValue(value, "utilization"); ok {
 			row.RemainingPercent = remainingPercent(100 - percent)
 		}
@@ -973,7 +862,7 @@ func (c *authQuotaClient) fetchClaudeQuota(result *authQuotaResponse) error {
 	if fable != nil {
 		percent, _ := floatValue(fable, "percent")
 		result.Quota = append(result.Quota, quotaRow{Label: "Fable weekly limit", LabelMessage: messages.New("Fable weekly limit"),
-			RemainingPercent: remainingPercent(100 - percent), ResetAt: quotaResetAt(firstString(fable, "resets_at", "resetsAt")), windowSeconds: week, meter: claudeModelMeter("fable")})
+			RemainingPercent: remainingPercent(100 - percent), ResetAt: quotaResetAt(firstString(fable, "resets_at", "resetsAt")), windowSeconds: week})
 	}
 	if extra := objectMap(usage, "extra_usage", "extraUsage"); extra != nil {
 		enabled, hasEnabled := boolValue(extra, "is_enabled", "isEnabled")
@@ -1036,7 +925,7 @@ func (c *authQuotaClient) fetchKimiQuota(result *authQuotaResponse) error {
 		}
 		windowSeconds := kimiWindowSeconds(limit)
 		label := firstNonEmptyString(firstString(limit, "name", "title"), firstString(detail, "name", "title"), windowLabel(windowSeconds), "Quota")
-		row := quotaRow{Label: label, windowSeconds: windowSeconds, meter: &quotaMeter{},
+		row := quotaRow{Label: label, windowSeconds: windowSeconds,
 			ResetAt: quotaResetAt(firstString(limit, "reset_at", "resetAt", "resetTime"), firstString(detail, "reset_at", "resetAt", "resetTime"))}
 		if firstNonEmptyString(firstString(limit, "name", "title"), firstString(detail, "name", "title")) == "" {
 			row.LabelMessage = messages.Literal(label)
@@ -1090,7 +979,7 @@ func (c *authQuotaClient) fetchXAIQuota(result *authQuotaResponse) error {
 	if percent, ok := floatValue(weeklyConfig, "creditUsagePercent", "credit_usage_percent"); ok {
 		resetAt, start := xaiResetAt(weeklyConfig), firstString(objectMap(weeklyConfig, "currentPeriod", "current_period"), "start")
 		result.Quota = append(result.Quota, quotaRow{Label: "Weekly limit", LabelMessage: messages.New("Weekly limit"), RemainingPercent: remainingPercent(100 - percent),
-			ResetAt: resetAt, windowSeconds: periodSeconds(start, resetAt), meter: &quotaMeter{}})
+			ResetAt: resetAt, windowSeconds: periodSeconds(start, resetAt)})
 	}
 	prepaid, hasPrepaid := usdValue(weeklyConfig, "prepaidBalance", "prepaid_balance")
 	if !hasPrepaid {
@@ -1110,7 +999,7 @@ func (c *authQuotaClient) fetchXAIQuota(result *authQuotaResponse) error {
 	if hasLimit || hasUsed {
 		resetAt := quotaResetAt(firstString(monthlyConfig, "billingPeriodEnd", "billing_period_end"))
 		row := quotaRow{Label: "Monthly allowance", LabelMessage: messages.New("Monthly allowance"), Currency: "USD", ResetAt: resetAt,
-			windowSeconds: periodSeconds(firstString(monthlyConfig, "billingPeriodStart", "billing_period_start"), resetAt), meter: &quotaMeter{}}
+			windowSeconds: periodSeconds(firstString(monthlyConfig, "billingPeriodStart", "billing_period_start"), resetAt)}
 		if hasLimit {
 			row.Limit = floatPointer(monthlyLimit)
 		}
