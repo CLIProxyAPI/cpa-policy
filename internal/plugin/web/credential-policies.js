@@ -49,8 +49,8 @@ function updateCredentialConcurrency(index, value) {
 
 function renderCredentialConcurrency() {
   if (!currentRole) return;
-  if (activeTab() === "auth-files") {
-    for (const row of $("auth-files-body").querySelectorAll("[data-auth-index]"))
+  if (["auth-files", "ai-providers"].includes(activeTab())) {
+    for (const row of $(activeTab() + "-body").querySelectorAll("[data-auth-index]"))
       updateCredentialConcurrency(row.dataset.authIndex, row.querySelector("[data-concurrency-value]"));
   }
   renderDataStatus();
@@ -61,20 +61,24 @@ function defaultCredentialPolicy() {
   return { max_concurrency: 0, location_mode: "inherit", location: { country: "", region: "", city: "", timezone: "" } };
 }
 
-function credentialSettingsButton(row, kind) {
+function credentialSettingsButton(row, kind, busy = false) {
   const name = row.email || row.name || row.base_url || row.auth_index;
-  return el("button", {
-    type: "button",
-    class: "credential-settings-button",
-    text: m("ui.settings"),
-    disabled: !row.auth_index,
-    "aria-label": m("policy.edit", { name }),
-    onclick: (event) => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      guard(async () => { try { await editCredentialPolicy(row, kind, name); } finally { button.disabled = !row.auth_index; } });
-    }
-  });
+  return el(
+    "button",
+    {
+      type: "button",
+      class: "labeled-icon-button credential-icon-button credential-settings-button",
+      disabled: !row.auth_index || busy,
+      "aria-label": m("policy.edit", { name }),
+      "data-tip": m("ui.settings"),
+      onclick: (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        guard(async () => { try { await editCredentialPolicy(row, kind, name); } finally { button.disabled = !row.auth_index; } });
+      }
+    },
+    actionIcon("settings")
+  );
 }
 
 // Both the global form and credential dialog use this compact location control.
@@ -212,11 +216,16 @@ function locationEditor({
 
 async function editCredentialPolicy(row, kind, name) {
   const generation = sessionGeneration;
-  const [current, global] = await Promise.all([readCredentialPolicies(), plugin("GET", "/location")]);
+  const supportsLocation = (row.category || row.type) === "codex" || (kind === "provider" && row.type === "openai");
+  const [current, global, risk] = await Promise.all([
+    readCredentialPolicies(),
+    supportsLocation ? plugin("GET", "/location") : null,
+    plugin("GET", "/moderation")
+  ]);
   if (generation !== sessionGeneration) throw new StaleRequestError();
   const original = current.policies[row.auth_index] || defaultCredentialPolicy();
   const draft = structuredClone(original);
-  const defaults = global.custom_location;
+  const defaults = global?.custom_location;
   let mode = draft.location_mode || "inherit";
   let saving = false;
   let detecting = false;
@@ -232,36 +241,52 @@ async function editCredentialPolicy(row, kind, name) {
   });
   const error = el("p", { class: "credential-error", role: "alert" });
   const cancel = el("button", { type: "button", text: m("ui.cancel"), onclick: () => dialog.close() });
+  const close = el(
+    "button",
+    { type: "button", class: "dialog-close", "aria-label": m("ui.close"), onclick: () => dialog.close() },
+    actionIcon("x")
+  );
   const save = el("button", { type: "submit", class: "primary", text: m("ui.save") });
-  const editor = locationEditor({
-    prefix: "credential-policy",
-    location: mode === "inherit" ? defaults : draft.location,
-    enabled: mode === "inherit" ? defaults.enabled : mode === "custom",
-    request: kind === "provider" ? { auth_index: row.auth_index, configured_proxy: row.proxy_url || "" } : { auth_index: row.auth_index },
-    onChange: () => {
-      mode = editor.toggle.checked ? "custom" : "preserve";
-      update();
-    },
-    onBusy: (value) => {
-      detecting = value;
-      update();
-    }
-  });
+  const riskEditor = credentialModerationEditor(draft.moderation, risk.moderation);
+  const editor = supportsLocation
+    ? locationEditor({
+        prefix: "credential-policy",
+        location: mode === "inherit" ? defaults : draft.location,
+        enabled: mode === "inherit" ? defaults.enabled : mode === "custom",
+        request:
+          kind === "provider" ? { auth_index: row.auth_index, configured_proxy: row.proxy_url || "" } : { auth_index: row.auth_index },
+        onChange: () => {
+          mode = editor.toggle.checked ? "custom" : "preserve";
+          update();
+        },
+        onBusy: (value) => {
+          detecting = value;
+          update();
+        }
+      })
+    : null;
   function update() {
     limit.disabled = saving;
     cancel.disabled = saving;
+    close.disabled = saving;
     save.disabled = saving || detecting;
-    editor.setDisabled(saving);
+    editor?.setDisabled(saving);
+    riskEditor.setDisabled(saving);
   }
   const form = el(
     "form",
     {},
-    el("h2", { id: "credential-policy-title", text: m("policy.title") }),
-    el("p", { class: "muted policy-identity", text: name }),
-    el("label", { class: "field" }, el("span", { text: m("policy.concurrency") }), limit),
-    el("p", { class: "small muted", text: m("policy.concurrency_help") }),
-    editor.node,
-    error,
+    el("div", { class: "dialog-header" }, el("h2", { id: "credential-policy-title", text: m("policy.title") }), close),
+    el(
+      "div",
+      { class: "dialog-body" },
+      el("p", { class: "muted policy-identity", text: name }),
+      el("label", { class: "field" }, el("span", { text: m("policy.concurrency") }), limit),
+      el("p", { class: "small muted", text: m("policy.concurrency_help") }),
+      editor?.node,
+      riskEditor.node,
+      error
+    ),
     el("div", { class: "row dialog-actions" }, cancel, save)
   );
   form.addEventListener("submit", (event) => {
@@ -269,10 +294,13 @@ async function editCredentialPolicy(row, kind, name) {
     guard(async () => {
       if (saving || detecting) return;
       const policy = {
+        ...draft,
         max_concurrency: Number(limit.value),
         location_mode: mode,
-        location: mode === "inherit" ? draft.location : editor.getLocation()
+        location: mode === "inherit" || !editor ? draft.location : editor.getLocation()
       };
+      const moderation = riskEditor.getValue();
+      if (moderation) policy.moderation = moderation; else delete policy.moderation;
       saving = true;
       update();
       setText(error, "");
@@ -301,7 +329,7 @@ async function editCredentialPolicy(row, kind, name) {
         credentialConcurrencyQuery.clear();
         dialog.close();
         if (kind === "provider") {
-          await readAIProviders(true);
+          await settleLoads([readAIProviders(true), readCredentialConcurrency(true)]);
           renderAIProviders();
         } else {
           await settleLoads([readAuthFiles(true), readCredentialConcurrency(true)]);

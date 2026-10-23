@@ -117,6 +117,10 @@ const PROVIDER_LABELS = {
   antigravity: "Antigravity",
   codex: "Codex",
   gemini: "Gemini",
+  "gemini-cli": "Gemini CLI",
+  "gemini-interactions": "Gemini Interactions",
+  interactions: "Gemini Interactions",
+  qwen: "Qwen",
   xai: "xAI",
   kimi: "Kimi",
   vertex: "Vertex",
@@ -138,6 +142,12 @@ const PROVIDER_ICONS = {
 
 function providerIcon(brand) {
   const markup = PROVIDER_ICONS[brand];
-  if (!markup) return null;
+  if (!markup)
+    return el("span", {
+      class: "provider-icon provider-icon-fallback",
+      role: "img",
+      "aria-label": PROVIDER_LABELS[brand] || brand,
+      text: String(brand || "?").slice(0, 1).toUpperCase()
+    });
   return el("span", { class: "provider-icon", "data-provider": brand, role: "img", "aria-label": PROVIDER_LABELS[brand] }, iconSVG(markup));
 }

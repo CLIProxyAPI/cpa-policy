@@ -76,13 +76,19 @@ function resetRoleData() {
   authFilesQueries.admin.clear();
   aiProvidersQuery.clear();
   credentialConcurrencyQuery.clear();
+  Object.values(credentialHealthQueries).forEach((query) => query.clear());
   resetDiagnostics();
+  resetModeration();
 }
 function renderDataStatus() {
   if (!currentRole) return;
   const tab = activeTab();
   const query = tab === "auth-files" ? authFilesQueries.admin : tab === "ai-providers" ? aiProvidersQuery : null;
-  const error = query?.error || (tab === "auth-files" && credentialConcurrencyQuery.error ? m("policy.concurrency_unavailable") : "");
+  const credentials = ["auth-files", "ai-providers"].includes(tab);
+  const health = credentialHealthQueries[tab === "auth-files" ? "auth" : "provider"];
+  const error =
+    query?.error || (credentials && credentialConcurrencyQuery.error ? m("policy.concurrency_unavailable") : "") ||
+    (credentials && health.error ? m("health.load_failed") : "");
   setText($("admin-data-status"), error);
   $("admin-data-status").classList.toggle("show", !!error);
 }
@@ -92,15 +98,19 @@ function renderPage() {
   renderDataStatus();
   if (tab === "auth-files") renderAuthFiles();
   else if (tab === "ai-providers") renderAIProviders();
+  else if (tab === "moderation") renderModerationEvents();
   else if (tab === "errors") renderDiagnostics("errors"); else if (tab === "settings") renderDiagnostics("logs");
   updateRefreshControls();
 }
 async function loadPage({ reload = false } = {}) {
   if (!currentRole) return;
   const tab = activeTab();
-  if (tab === "auth-files") await settleLoads([readAuthFiles(reload), readCredentialConcurrency(true)]);
-  else if (tab === "ai-providers") await readAIProviders(reload);
+  if (tab === "auth-files") await settleLoads([readAuthFiles(reload), readCredentialConcurrency(true), readCredentialHealth("auth", true)]);
+  else if (tab === "ai-providers")
+    await settleLoads([readAIProviders(reload), readCredentialConcurrency(true), readCredentialHealth("provider", true)]);
   else if (tab === "errors") await loadDiagnostics("errors", reload);
-  else if (tab === "settings") await settleLoads([loadDiagnostics("logs", reload), loadConcurrencySettings(reload)]);
+  else if (tab === "moderation") await settleLoads([loadModerationSettings(reload), loadModerationEvents(reload)]);
+  else if (tab === "settings")
+    await settleLoads([loadDiagnostics("logs", reload), loadConcurrencySettings(reload), ...(reload ? [loadLocationSettings()] : [])]);
   renderPage();
 }

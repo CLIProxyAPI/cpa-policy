@@ -18,10 +18,10 @@ const (
 const (
 	PluginID   = "cpa-codex-controls"
 	PluginName = "cpa-codex-controls"
-	Version    = "1.4.2-timezone.14"
+	Version    = "1.4.3"
 
 	MenuLabel       = "Account Controls"
-	MenuDescription = "Manage credential concurrency, timezone overrides, and diagnostics"
+	MenuDescription = "Manage credential concurrency, timezone overrides, content audit, and diagnostics"
 )
 
 // CPA requires a nonempty repository. Release builds replace this placeholder

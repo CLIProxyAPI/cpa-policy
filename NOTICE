@@ -1,4 +1,4 @@
-CPA Key Billing — custom timezone/location extension
+CPA Policy — credential controls, timezone overrides, and content audit
 
 This work retains cpa-plugin-key-billing by Hao Wang, originally licensed
 under the MIT License in LICENSE, at commit
@@ -16,7 +16,7 @@ XML parsing and byte-preserving JSON field updates and adds conservative
 message-type and malformed-metadata checks.
 
 Modified files include location validation/normalization, per-credential
-concurrency controls, timezone display, plugin registration and management
+concurrency controls, content audit, timezone display, plugin registration and management
 endpoints, independent diagnostics with read-only history import, the
 management UI, and validation/build documentation. The customized version
 removes the original billing, API Key, subscription, pricing, analytics,

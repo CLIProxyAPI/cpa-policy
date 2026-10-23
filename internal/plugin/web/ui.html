@@ -53,6 +53,7 @@
    <div class="page-tab-switcher"><div class="tabs">
     <button type="button" data-tab="auth-files" class="active" data-i18n="ui.auth_files">Auth Files</button>
     <button type="button" data-tab="ai-providers" data-i18n="ui.ai_providers">AI Providers</button>
+    <button type="button" data-tab="moderation" data-i18n="risk.title">Risk Control</button>
     <button type="button" data-tab="errors" data-i18n="ui.error_events">Error events</button>
     <button type="button" data-tab="settings" data-i18n="ui.settings">Settings</button>
    </div><span class="native-select page-tab-select"><select id="page-tab-select" aria-label="Select view" data-i18n-aria-label="ui.select_view"></select></span></div>
@@ -70,7 +71,7 @@
               <div class="row section-actions credential-filter-bar">
                 <div class="credential-filter-switches">
                   <label class="toggle-filter">
-                    <input id="auth-enabled-only" type="checkbox" role="switch" checked />
+                    <input id="auth-enabled-only" type="checkbox" role="switch" />
                     <span data-i18n="ui.enabled_only">Enabled only</span>
                   </label>
                 </div>
@@ -87,7 +88,7 @@
               <div class="row section-actions credential-filter-bar">
                 <div class="credential-filter-switches">
                   <label class="toggle-filter">
-                    <input id="ai-provider-enabled-only" type="checkbox" role="switch" checked />
+                    <input id="ai-provider-enabled-only" type="checkbox" role="switch" />
                     <span data-i18n="ui.enabled_only">Enabled only</span>
                   </label>
                 </div>
@@ -97,21 +98,40 @@
             </div>
             <div id="ai-providers-body" class="credential-list"></div>
           </div>
-        </section><section id="tab-errors" class="hidden"><div class="card">
+        </section><section id="tab-moderation" class="hidden">
+<form id="moderation-form" class="card settings-form">
+<h2 data-i18n="risk.title">Risk Control</h2>
+<p class="small muted" data-i18n="risk.description">Audit user text before forwarding. Account settings take precedence over global policy.</p>
+<div id="moderation-policy-host"></div>
+<details class="moderation-api-settings"><summary data-i18n="risk.api_settings">Audit API settings</summary>
+<p class="small muted" data-i18n="risk.api_help">OpenAI Moderations compatible endpoint. API checks send selected user text to this service. Local hits are not sent.</p>
+<div id="moderation-api-host"></div><p id="moderation-key-status" class="small muted" role="status"></p></details>
+<div id="moderation-error" class="notice err" role="alert"></div>
+<div class="row location-actions"><button id="moderation-discard" type="button" data-i18n="settings.discard" disabled>Discard changes</button><button id="moderation-save" type="submit" class="primary" data-i18n="ui.save" disabled>Save</button></div>
+</form>
+<form id="moderation-test-form" class="card settings-form">
+<h2 data-i18n="risk.test">Test policy</h2><p class="small muted" data-i18n="risk.test_help">Uses the current draft without saving, logging or sending an inference request. API mode calls the audit service.</p>
+<label class="field"><span data-i18n="risk.test_model">Requested model name</span><input id="moderation-test-model" maxlength="256" placeholder="gpt-5" data-i18n-placeholder="risk.test_model_example" /></label>
+<label class="field"><span data-i18n="risk.test_text">Test text</span><textarea id="moderation-test-text" rows="4" maxlength="64000" required></textarea></label>
+<div class="row location-actions"><button id="moderation-test-run" type="submit" data-i18n="risk.run_test" disabled>Run test</button></div>
+<div id="moderation-test-result" aria-live="polite"></div></form>
+<div class="card"><h2 data-i18n="risk.records">Audit records</h2><p class="small muted" data-i18n="risk.records_help">Records hits, audit errors and requests containing unaudited media. Retained for 30 days, up to 10,000 records. Policy tests are not stored.</p>
+<div id="moderation-events"></div><div class="row dialog-actions"><button id="moderation-more" type="button" data-i18n="controls.load_more" hidden>Load more</button></div>
+</div></section><section id="tab-errors" class="hidden"><div class="card">
  <div class="row spread section-toolbar"><h2 data-i18n="ui.error_events">Error events</h2></div>
  <div id="errors-body"></div><div class="row dialog-actions"><button id="errors-more" type="button" data-i18n="controls.load_more">Load more</button></div>
  </div></section>        <section id="tab-concurrency" class="hidden">
-<form id="concurrency-form" class="card">
+<form id="concurrency-form" class="card settings-form">
 <h2 data-i18n="concurrency.title">Concurrency policy</h2>
 <div class="concurrency-fields">
-<label class="field" for="concurrency-account_queue_capacity"><span data-i18n="concurrency.account_queue_capacity">Account queue capacity</span><span class="small muted" data-i18n="concurrency.account_queue_capacity_help">Maximum waiting requests per upstream account. 0 disables queuing.</span><input id="concurrency-account_queue_capacity" type="number" min="0" max="1000" step="1" value="0" required disabled /></label><label class="field" for="concurrency-queue_timeout_seconds"><span data-i18n="concurrency.queue_timeout_seconds">Queue timeout (seconds)</span><span class="small muted" data-i18n="concurrency.queue_timeout_seconds_help">Maximum wait from first enqueue, 1–120 seconds. Timeout returns HTTP 429.</span><input id="concurrency-queue_timeout_seconds" type="number" min="1" max="120" step="1" value="30" required disabled /></label></div><div id="concurrency-error" class="notice err" role="alert"></div><div class="row location-actions"><button id="concurrency-reload" type="button" data-i18n="location.reload">Reload settings</button><button id="concurrency-save" type="submit" class="primary" data-i18n="ui.save" disabled>Save</button></div></form></section><section id="tab-location" class="hidden">
-          <form id="location-form" class="card">
+<label class="field" for="concurrency-account_queue_capacity"><span data-i18n="concurrency.account_queue_capacity">Account queue capacity</span><input id="concurrency-account_queue_capacity" type="number" min="0" max="1000" step="1" value="0" required disabled /><span class="small muted" data-i18n="concurrency.account_queue_capacity_help">Maximum waiting requests per upstream account. 0 disables queuing.</span></label><label class="field" for="concurrency-queue_timeout_seconds"><span data-i18n="concurrency.queue_timeout_seconds">Queue timeout (seconds)</span><input id="concurrency-queue_timeout_seconds" type="number" min="1" max="120" step="1" value="30" required disabled /><span class="small muted" data-i18n="concurrency.queue_timeout_seconds_help">Maximum wait from first enqueue, 1–120 seconds. Timeout returns HTTP 429.</span></label></div><div id="concurrency-error" class="notice err" role="alert"></div><div class="row location-actions"><button id="concurrency-discard" type="button" data-i18n="settings.discard" disabled>Discard changes</button><button id="concurrency-save" type="submit" class="primary" data-i18n="ui.save" disabled>Save</button></div></form></section><section id="tab-location" class="hidden">
+          <form id="location-form" class="card settings-form">
             <h2 data-i18n="location.title">Request timezone override</h2>
             <p class="muted small" data-i18n="location.description">Override timezone and location fields in Codex requests. Custom locations for account outbound proxies take precedence.</p>
             <div id="location-editor-host"></div>
             <div id="location-error" class="notice err" role="alert"></div>
             <div class="row location-actions">
-              <button id="location-reload" type="button" data-i18n="location.reload">Reload settings</button>
+              <button id="location-discard" type="button" data-i18n="settings.discard" disabled>Discard changes</button>
               <button id="location-save" type="submit" class="primary" data-i18n="ui.save" disabled>Save</button>
             </div>
           </form>
@@ -135,7 +155,7 @@
             <div id="plugin-logs-body" class="event-list-region"></div>
             <div class="event-list-footer"><button id="logs-more" type="button" data-i18n="controls.load_more">Load more</button></div>
           </div>
-        </section></main><footer class="footer"><span data-i18n="controls.title">Account Controls</span>: v1.4.2-timezone.14</footer></div>
+        </section></main><footer class="footer"><span data-i18n="controls.title">Account Controls</span>: v1.4.3</footer></div>
  <div id="notice" class="notice" popover="manual" role="status"></div>
     <dialog id="action-dialog">
       <h2 id="action-dialog-title"></h2>
@@ -153,9 +173,11 @@
   /*components.js*/
   /*data.js*/
   /*credentials.js*/
+  /*credential-health.js*/
   /*auth-files.js*/
   /*ai-providers.js*/
   /*diagnostics.js*/
+  /*moderation.js*/
   /*credential-policies.js*/
   /*location-settings.js*/
   /*concurrency-settings.js*/

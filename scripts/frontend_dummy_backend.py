@@ -244,6 +244,16 @@ applyTheme(INITIAL_THEME);
 
 AUTH_FILES = [
     {
+        "auth_index": "auth-demo-gemini", "name": "gemini-test@example.com.json",
+        "category": "gemini-cli", "email": "gemini-test@example.com", "disabled": True,
+        "unavailable": False, "quota_supported": False,
+    },
+    {
+        "auth_index": "auth-demo-qwen", "name": "qwen-test@example.com.json",
+        "category": "qwen", "email": "qwen-test@example.com", "disabled": False,
+        "unavailable": False, "quota_supported": False,
+    },
+    {
         "auth_index": "auth-demo-codex-plus",
         "name": "codex-dev-team@example.com.json",
         "category": "codex",
@@ -320,9 +330,9 @@ AI_PROVIDER_LISTS = {
          "priority": 10, "weight": 10, "auth-index": "ai-demo-codex-relay"},
     ],
     "gemini-api-key": [
-        {"api-key": "AIzaDummyGeminiKey0000000000001", "excluded-models": ["*"], "auth-index": "ai-demo-gemini"},
+        {"api-key": "AIzaDummyGeminiKey0000000000001", "excluded-models": ["gemini-private", "*"], "auth-index": "ai-demo-gemini"},
     ],
-    "interactions-api-key": [],
+    "interactions-api-key": [{"api-key": "dummy-interactions-key-001", "auth-index": "ai-demo-interactions"}],
     "vertex-api-key": [
         {"api-key": "vertex-dummy-key-0000000000001", "base-url": "https://aiplatform.googleapis.com", "auth-index": "ai-demo-vertex"},
     ],
@@ -363,8 +373,66 @@ AI_BALANCE_RESPONSES = {
 }
 AUTH_FILES.sort(key=lambda file: (file["category"],file["name"]))
 NOW=lambda:datetime.now(timezone.utc).isoformat()
+
+def demo_health(seed):
+    end=datetime.now(timezone.utc).replace(second=0,microsecond=0)
+    end=end.replace(minute=end.minute//10*10)
+    buckets=[]
+    for i in range(20):
+        start=end-timedelta(minutes=(19-i)*10)
+        buckets.append({"time":start.strftime("%H:%M")+"-"+(start+timedelta(minutes=10)).strftime("%H:%M"),
+                        "success":0 if seed==0 else (i+seed)%5,
+                        "failed":0 if seed==0 else (1 if i%7==seed%7 else 0)})
+    return {"recent_requests":buckets,"success":sum(b["success"] for b in buckets),"failed":sum(b["failed"] for b in buckets)}
+
+def demo_provider_health():
+    result={}
+    for kind,entries in AI_PROVIDER_LISTS.items():
+        for i,entry in enumerate(entries):
+            provider=(entry.get("name","") if kind=="openai-compatibility" else kind.removesuffix("-api-key")).lower()
+            for key in entry.get("api-key-entries",[entry]):
+                if key.get("api-key"):
+                    result.setdefault(provider,{})[entry.get("base-url","")+"|"+key["api-key"]]=demo_health(i+1)
+    return result
+
 PLUGIN_LOGS=[{"id":"2","at":NOW(),"level":"info","message":"Plugin configuration applied"}, {"id":"1","at":NOW(),"level":"info","message":"Account controls enabled"}]
 ERRORS=[{"id":"1","at":NOW(),"provider":"codex","model":"demo-model","auth_index":"auth-demo-codex-plus","status_code":429,"error_type":"rate_limit_exceeded","body":"Synthetic preview: upstream rate limit reached."}]
+def moderation_defaults():
+    return {"mode":"off","strategy":"keywords","scope":"latest_user","model_mode":"all","models":[],"rules":[],"failure_action":"block","log_excerpt":False,
+            "api":{"url":"","model":"omni-moderation-latest","key_env":"CPA_POLICY_MODERATION_API_KEY","timeout_ms":3000,"max_in_flight":8,"thresholds":{}}}
+
+MODERATION_SETTINGS=moderation_defaults()
+MODERATION_EVENTS=[{"id":"2","at":NOW(),"auth_index":"auth-demo-codex-plus","model":"demo-model","source_format":"codex","status":"flagged","action":"block","rules":["demo-rule"]},
+                   {"id":"1","at":NOW(),"auth_index":"auth-demo-claude","model":"demo-claude","source_format":"claude","status":"error","action":"allow","reason":"api_timeout_or_canceled"}]
+
+def normalized_moderation(data,policy_only=False):
+    defaults=moderation_defaults()
+    result={k:data.get(k,v) for k,v in defaults.items() if k!="api"}
+    for key,values in {"mode":["off","observe","pre_block"],"strategy":["keywords","api","keywords_and_api"],"scope":["latest_user","all_users"],"model_mode":["all","include","exclude"],"failure_action":["allow","block"]}.items():
+        if result[key] not in values:raise ValueError("Invalid moderation "+key)
+    if result["mode"]!="off" and result["strategy"]=="keywords" and not result["rules"]:raise ValueError("Keyword moderation requires at least one rule")
+    ids=set()
+    for rule in result["rules"]:
+        if rule.get("id") in ids or not rule.get("pattern"):raise ValueError("Invalid moderation rule")
+        ids.add(rule.get("id"))
+        if rule.get("kind")=="regex":re.compile(rule["pattern"])
+    if not policy_only:
+        api={**defaults["api"],**data.get("api",{})}
+        if result["mode"]!="off" and result["strategy"]!="keywords" and not api["url"]:raise ValueError("Moderation API URL is required")
+        result["api"]=api
+    return result
+
+def demo_moderation_test(data):
+    cfg=normalized_moderation(data.get("config",MODERATION_SETTINGS))
+    model=data.get("model","")
+    if cfg["mode"]=="off" or cfg["model_mode"]=="include" and model not in cfg["models"] or cfg["model_mode"]=="exclude" and model in cfg["models"]:
+        return {"status":"skipped","action":"allow","reason":"policy_not_applicable"}
+    text=data.get("text","")
+    hits=[r["id"] for r in cfg["rules"] if (r["pattern"].lower() in text.lower() if r["kind"]=="keyword" else re.search(r["pattern"],text))] if cfg["strategy"]!="api" else []
+    if hits:return {"status":"flagged","action":"block" if cfg["mode"]=="pre_block" else "observe","rules":hits}
+    if cfg["strategy"]!="keywords":return {"status":"error","action":"block" if cfg["mode"]=="pre_block" and cfg["failure_action"]=="block" else "allow","reason":"api_not_configured"}
+    return {"status":"passed","action":"allow"}
+
 def normalized_location(value):
     result={"enabled":bool(value.get("enabled",False)),**{key:str(value.get(key,"")).strip() for key in ("country","region","city","timezone")}}
     result["country"]=result["country"].upper()
@@ -384,6 +452,9 @@ def normalized_policies(data):
         concurrency_mode=policy.get("concurrency_mode","")
         if concurrency_mode not in ("","inherit","custom"):raise ValueError("Invalid concurrency mode")
         result[index]={"max_concurrency":0 if concurrency_mode=="inherit" else count,"location_mode":mode,"location":place}
+        risk=policy.get("moderation")
+        if risk and risk.get("mode")=="off":result[index]["moderation"]={"mode":"off"}
+        elif risk and risk.get("mode")=="custom":result[index]["moderation"]={"mode":"custom","policy":normalized_moderation(risk["policy"],True)}
     return result
 
 def normalized_concurrency(data):
@@ -407,7 +478,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_PATCH(self):self.dispatch("PATCH")
     def do_DELETE(self):self.dispatch("DELETE")
     def dispatch(self,method):
-        global LOCATION_SETTINGS,CREDENTIAL_POLICIES,CONCURRENCY_SETTINGS
+        global LOCATION_SETTINGS,CREDENTIAL_POLICIES,CONCURRENCY_SETTINGS,MODERATION_SETTINGS
         parsed=urlparse(self.path);path=parsed.path;query=parse_qs(parsed.query)
         if method=="GET" and path=="/" and self.host_mode!="standalone":
             label="CPAMC" if self.host_mode=="cpamc" else "CPAMP"
@@ -425,11 +496,16 @@ class Handler(BaseHTTPRequestHandler):
             route=(method,path)
             if route==("GET",API_BASE+"/location"):return self.respond(200,{"custom_location":LOCATION_SETTINGS,"effective_timezone":LOCATION_SETTINGS["timezone"] if LOCATION_SETTINGS["enabled"] else ""})
             if route==("GET",API_BASE+"/credential-policies"):return self.respond(200,{"policies":CREDENTIAL_POLICIES,"active":{},"waiting":{},"concurrency":CONCURRENCY_SETTINGS})
+            if route==("GET",API_BASE+"/moderation"):return self.respond(200,{"moderation":MODERATION_SETTINGS,"api_key_configured":False})
+            if route==("POST",API_BASE+"/moderation/validate"):return self.respond(200,{"moderation":normalized_moderation(data)})
+            if route==("POST",API_BASE+"/moderation/test"):return self.respond(200,{"result":demo_moderation_test(data)})
+            if route==("GET",API_BASE+"/moderation/events"):return self.respond(200,{"entries":MODERATION_EVENTS})
             if route==("GET",API_BASE+"/concurrency"):return self.respond(200,{"concurrency":CONCURRENCY_SETTINGS})
             if route==("POST",API_BASE+"/concurrency/validate"):return self.respond(200,{"concurrency":normalized_concurrency(data)})
             if route==("POST",API_BASE+"/location/validate"):return self.respond(200,{"custom_location":normalized_location(data)})
             if route==("POST",API_BASE+"/credential-policies/validate"):return self.respond(200,{"policies":normalized_policies(data)})
             if route==("PATCH",API_BASE+"/config"):
+                if "moderation" in data:MODERATION_SETTINGS=normalized_moderation(data["moderation"])
                 if "concurrency" in data:CONCURRENCY_SETTINGS=normalized_concurrency(data["concurrency"])
                 if "custom_location" in data:LOCATION_SETTINGS=normalized_location(data["custom_location"])
                 if "credential_policies" in data:CREDENTIAL_POLICIES=normalized_policies(data["credential_policies"])
@@ -437,16 +513,36 @@ class Handler(BaseHTTPRequestHandler):
             if route==("POST",API_BASE+"/location/detect"):
                 place={"country":"JP","region":"Tokyo","city":"Tokyo","timezone":"Asia/Tokyo"} if data.get("auth_index") else {"country":"HK","region":"Hong Kong","city":"Hong Kong","timezone":"Asia/Hong_Kong"}
                 return self.respond(200,{"location":place,"exit_ips":["203.0.113.10"],"source":"demo","detected_at":NOW()})
-            if method=="GET" and path in (API_BASE+"/auth-files","/v0/management/auth-files"):return self.respond(200,{"files":AUTH_FILES})
+            if route==("GET",API_BASE+"/auth-files"):return self.respond(200,{"files":AUTH_FILES})
+            if route==("GET","/v0/management/auth-files"):
+                return self.respond(200,{"files":[{**file,**demo_health(i)} for i,file in enumerate(AUTH_FILES)]})
+            if route==("GET","/v0/management/api-key-usage"):return self.respond(200,demo_provider_health())
             if route==("GET",API_BASE+"/auth-files/quota"):
-                return self.respond(200,{"fetched_at":NOW(),"auth_revision":"","plan":"Plus","quota":[{"label":"5-hour limit","remaining_percent":72,"reset_at":(datetime.now(timezone.utc)+timedelta(hours=3)).isoformat()}]})
+                file=next((file for file in AUTH_FILES if file["auth_index"]==query.get("auth_index",[""])[0]),None)
+                if file is None:return self.respond(404,{"error":"Auth file not found"})
+                return self.respond(200,{"fetched_at":NOW(),"auth_revision":file.get("cache_revision",""),"plan":"Plus","quota":[{"label":"5-hour limit","remaining_percent":72,"reset_at":(datetime.now(timezone.utc)+timedelta(hours=3)).isoformat()}]})
             if route==("POST",API_BASE+"/auth-files/quota/reset"):return self.respond(200,{"reset":True,"cooldown_cleared":True})
+            if route==("POST","/v0/management/auth-files/refresh"):
+                file=next((file for file in AUTH_FILES if file["name"]==data.get("name") and file["auth_index"]==data.get("auth_index")),None)
+                if file is None:return self.respond(404,{"error":"Auth file not found"})
+                file["cache_revision"]=NOW()
+                return self.respond(200,{"ok":True})
             if route==("PATCH","/v0/management/auth-files/status"):
                 for file in AUTH_FILES:
                     if file["auth_index"]==data.get("auth_index"):file["disabled"]=bool(data.get("disabled"))
                 return self.respond(200,{"ok":True})
             if method=="GET" and path.removeprefix("/v0/management/") in AI_PROVIDER_LISTS:
                 key=path.removeprefix("/v0/management/");return self.respond(200,{key:AI_PROVIDER_LISTS[key]})
+            if method=="PATCH" and path.removeprefix("/v0/management/") in AI_PROVIDER_LISTS:
+                key=path.removeprefix("/v0/management/")
+                index=data.get("index")
+                if type(index) is not int or not 0<=index<len(AI_PROVIDER_LISTS[key]):raise ValueError("Item not found")
+                patch=data.get("value",{})
+                if key=="openai-compatibility":
+                    if set(patch)!={"disabled"} or type(patch["disabled"]) is not bool:raise ValueError("Invalid switch patch")
+                elif set(patch)!={"excluded-models"} or not isinstance(patch["excluded-models"],list):raise ValueError("Invalid switch patch")
+                AI_PROVIDER_LISTS[key][index].update(patch)
+                return self.respond(200,{"status":"ok"})
             if route==("POST","/v0/management/api-call"):
                 status,body=AI_BALANCE_RESPONSES.get(data.get("url"),(404,{}))
                 return self.respond(200,{"status_code":status,"body":json.dumps(body)})

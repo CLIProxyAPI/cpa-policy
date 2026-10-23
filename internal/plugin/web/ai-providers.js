@@ -1,4 +1,25 @@
-const AI_PROVIDER_TYPES = [{ type: "codex", list: "codex-api-key", brand: "codex" }];
+const AI_PROVIDER_TYPES = [
+  { type: "codex", list: "codex-api-key", brand: "codex" },
+  { type: "claude", list: "claude-api-key", brand: "claude" },
+  { type: "gemini", list: "gemini-api-key", brand: "gemini" },
+  { type: "interactions", list: "interactions-api-key", brand: "gemini" },
+  { type: "vertex", list: "vertex-api-key", brand: "vertex" },
+  { type: "xai", list: "xai-api-key", brand: "xai" },
+  { type: "meta", list: "meta-api-key", brand: "meta" },
+  { type: "openai", list: "openai-compatibility", brand: "openai" }
+];
+// Raw configuration is kept only in memory, never in DOM attributes or persisted UI state.
+const aiProviderSources = new WeakMap();
+
+function aiProviderIdentity(entry, kind) {
+  const fields = ["name", "api-key", "base-url", "proxy-url", "prefix"];
+  return JSON.stringify([
+    fields.map((field) => entry[field] || ""),
+    kind.list === "openai-compatibility"
+      ? (entry["api-key-entries"] || []).map((key) => [key["api-key"] || "", key["proxy-url"] || ""])
+      : []
+  ]);
+}
 
 // Upstreams whose API keys can read their own account balance. A key's base URL must name one of
 // these hosts exactly, so a key is only ever sent to the upstream that issued it.
@@ -99,7 +120,12 @@ function configuredAIProviders(kind, entries) {
   // CPA weighs a credential without a weight as 1 and a negative one as 0.
   const weight = (value) => (Number.isFinite(value) ? Math.max(0, value) : 1);
   const providers = [];
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
+    const append = (provider, key = entry) => {
+      provider.control_id = kind.list + ":" + index;
+      aiProviderSources.set(provider, { kind, identity: aiProviderIdentity(entry, kind), key: text(key["api-key"]) });
+      providers.push(provider);
+    };
     const base = {
       type: kind.type,
       brand: kind.brand,
@@ -111,7 +137,7 @@ function configuredAIProviders(kind, entries) {
       // CPA loads no credential for an entry with neither a key nor a base URL.
       if (!key && !base.base_url) continue;
       const excluded = entry["excluded-models"] || [];
-      providers.push({
+      append({
         ...base,
         auth_index: text(entry["auth-index"]),
         key_preview: previewCredential(key),
@@ -124,15 +150,18 @@ function configuredAIProviders(kind, entries) {
     // Compatible providers carry their keys; one without keys is still a credential of its own.
     const provider = { ...base, name: text(entry.name), disabled: entry.disabled === true };
     const keys = entry["api-key-entries"] || [];
-    if (!keys.length) providers.push({ ...provider, auth_index: text(entry["auth-index"]), key_preview: "", weight: 1 });
+    if (!keys.length) append({ ...provider, auth_index: text(entry["auth-index"]), key_preview: "", weight: 1 });
     for (const key of keys) {
-      providers.push({
-        ...provider,
-        auth_index: text(key["auth-index"]),
-        key_preview: previewCredential(text(key["api-key"])),
-        proxy_url: text(key["proxy-url"]),
-        weight: weight(key.weight)
-      });
+      append(
+        {
+          ...provider,
+          auth_index: text(key["auth-index"]),
+          key_preview: previewCredential(text(key["api-key"])),
+          proxy_url: text(key["proxy-url"]),
+          weight: weight(key.weight)
+        },
+        key
+      );
     }
   }
   return providers;
@@ -148,13 +177,55 @@ async function fetchAIProviders() {
         throw error;
       }
       if (!Object.hasOwn(config, kind.list)) throw new UIError(m("ui.invalid_response_for_value", { v0: m("ui.ai_providers") }));
-      return configuredAIProviders(kind, configuredCredentialEntries(config, kind.list));
+      const rows = configuredAIProviders(kind, configuredCredentialEntries(config, kind.list));
+      await Promise.all(
+        rows.map(async (row) => {
+          const source = aiProviderSources.get(row);
+          if (source.key) source.healthKey = await sha256Hex(row.base_url + "|" + source.key);
+        })
+      );
+      return rows;
     })
   );
   return lists.flat();
 }
 
 function readAIProviders(reload = false) { return aiProvidersQuery.read("ai-providers", fetchAIProviders, reload); }
+
+async function setAIProviderEnabled(provider, enabled) {
+  const owner = adminUIState;
+  const source = aiProviderSources.get(provider);
+  if (!source || owner.aiStatusSubmissions.has(source.kind.list)) return;
+  owner.aiStatusSubmissions.add(source.kind.list);
+  renderAIProviders();
+  try {
+    // Re-resolve the entry after reordering; PATCH only the switch field, preserving all other settings.
+    const path = "/v0/management/" + source.kind.list;
+    const config = requireObject(await api("GET", path, null), m("ui.ai_providers"));
+    const entries = configuredCredentialEntries(config, source.kind.list);
+    const matches = entries.map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => aiProviderIdentity(entry, source.kind) === source.identity);
+    if (matches.length !== 1) throw new UIError(m("provider.changed"));
+    const { entry, index } = matches[0];
+    const excluded = (entry["excluded-models"] || []).filter((model) => model.trim() !== "*");
+    const value =
+      source.kind.list === "openai-compatibility" ? { disabled: !enabled } : { "excluded-models": enabled ? excluded : [...excluded, "*"] };
+    await api("PATCH", path, { index, value }, { command: true });
+    await aiProvidersQuery.task?.catch(() => {});
+    if (owner !== adminUIState) return;
+    await readAIProviders(true);
+    if (aiProvidersQuery.error) throw new UIError(m("provider.saved_reload_failed"));
+    const confirmed = (aiProvidersQuery.value || []).filter((row) => {
+      const next = aiProviderSources.get(row);
+      return next?.kind.list === source.kind.list && next.identity === source.identity;
+    });
+    if (!confirmed.length || confirmed.some((row) => row.disabled === enabled)) throw new UIError(m("provider.saved_reload_failed"));
+    notify(m(enabled ? "provider.enabled" : "provider.disabled"), "ok");
+  } finally {
+    owner.aiStatusSubmissions.delete(source.kind.list);
+    if (owner === adminUIState) renderAIProviders();
+  }
+}
 
 function updateAIProviders(providers) {
   const owner = adminUIState;
@@ -349,7 +420,6 @@ function filteredAIProviders() {
   const search = $("ai-provider-search").value.trim().toLocaleLowerCase();
   return (aiProvidersQuery.value || []).filter((provider) => {
     if ($("ai-provider-enabled-only").checked && provider.disabled) return false;
-    if (provider.type !== "codex") return false;
     if (!search) return true;
     return [provider.base_url, provider.type, provider.name, provider.key_preview].some((value) =>
       String(value || "").toLocaleLowerCase().includes(search)
@@ -420,8 +490,14 @@ function renderAIProviders() {
   const providers = filteredAIProviders();
   bulk.disabled = bulk.dataset.loading === "true" || !providers.some(aiBalanceUpstream);
   renderCollection(body, providers, {
-    headers: [m("ui.ai_providers"), { label: m("ui.balance"), class: "credential-quota-column" }, m("ui.actions")],
-    attrs: { class: "credential-table" },
+    headers: [
+      m("ui.ai_providers"),
+      { label: m("ui.balance"), class: "credential-quota-column" },
+      { label: m("health.title"), class: "credential-health-column" },
+      { label: m("policy.concurrency_column"), class: "credential-concurrency-column" },
+      { label: m("ui.actions"), class: "credential-actions-column" }
+    ],
+    attrs: { class: "credential-table policy-credential-table" },
     empty: m("ui.no_ai_providers_match_the_filters"),
     render: renderAIProviderRow
   });
@@ -430,10 +506,16 @@ function renderAIProviders() {
 function renderAIProviderRow(provider) {
   const upstream = aiBalanceUpstream(provider);
   const loading = adminUIState.aiBalanceLoading.has(provider.auth_index);
+  const source = aiProviderSources.get(provider);
+  const switching = !!source && adminUIState.aiStatusSubmissions.has(source.kind.list);
   const baseURL = provider.base_url.replace(/^https:\/\//i, "");
   return el(
     "tr",
-    { class: "credential-row" + (provider.disabled ? " disabled" : "") },
+    {
+      class: "credential-row" + (provider.disabled ? " disabled" : ""),
+      "data-auth-index": provider.auth_index,
+      "data-provider-control": provider.control_id
+    },
     el(
       "td",
       { class: "credential-identity-cell" },
@@ -453,6 +535,7 @@ function renderAIProviderRow(provider) {
           el(
             "div",
             { class: "credential-meta ai-provider-meta" },
+            el("span", { class: "tag plain", text: provider.name || PROVIDER_LABELS[provider.type] || provider.type }),
             el(
               "span",
               { class: "tag plain ai-provider-key" },
@@ -467,13 +550,15 @@ function renderAIProviderRow(provider) {
       )
     ),
     el("td", { class: "credential-quota-cell" }, renderAIBalance(provider)),
+    credentialHealthCell(provider, "provider"),
+    credentialConcurrencyCell(provider.auth_index),
     el(
       "td",
       { class: "credential-actions-cell" },
       el(
         "div",
         { class: "credential-actions" },
-        credentialSettingsButton(provider, "provider"),
+        credentialSettingsButton(provider, "provider", switching),
         el(
           "button",
           {
@@ -485,7 +570,18 @@ function renderAIProviderRow(provider) {
             onclick: () => guard(() => queryAIBalance(provider))
           },
           actionIcon("refresh")
-        )
+        ),
+        switchControl({
+          input: el("input", {
+            type: "checkbox",
+            role: "switch",
+            checked: !provider.disabled,
+            disabled: !source || switching,
+            "aria-label": m("provider.enable", { name: provider.name || PROVIDER_LABELS[provider.type] || provider.type }),
+            "data-tip": m(source?.kind.list === "openai-compatibility" ? "provider.group_switch" : "ui.enable"),
+            onchange: (event) => guard(() => setAIProviderEnabled(provider, event.target.checked))
+          })
+        })
       )
     )
   );

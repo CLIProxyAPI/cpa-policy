@@ -3,7 +3,6 @@ package settings
 import (
 	"cpa-codex-controls/internal/location"
 	"fmt"
-	"maps"
 )
 
 // ConcurrencySettings control waiting only for credentials with a positive limit.
@@ -38,7 +37,7 @@ func (s *Store) ConcurrencySettings() ConcurrencySettings {
 func (s *Store) CredentialConcurrencyView() (location.CredentialPolicies, ConcurrencySettings) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return maps.Clone(s.cfg.CredentialPolicies), s.cfg.Concurrency
+	return s.cfg.CredentialPolicies.Clone(), s.cfg.Concurrency
 }
 
 // Read limit and queue settings under one lock so a reload cannot mix versions.

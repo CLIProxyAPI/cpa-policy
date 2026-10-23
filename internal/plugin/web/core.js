@@ -26,7 +26,7 @@ function readPanelKey() {
 
 const embedded = window.parent !== window;
 document.body.classList.toggle("embedded", embedded);
-const ADMIN_TAB_IDS = ["auth-files", "ai-providers", "errors", "settings"];
+const ADMIN_TAB_IDS = ["auth-files", "ai-providers", "moderation", "errors", "settings"];
 const PAGE_ROUTE_KEY = "cpa-codex-controls.route.v1." + (embedded ? "embedded" : "standalone");
 
 function parsePageRoute(value) {
@@ -66,6 +66,8 @@ function emptyAdminUIState() {
   return {
     ...emptyAuthQuotaState(),
     authStatusSubmissions: new Map(),
+    authCredentialRefreshing: new Set(),
+    aiStatusSubmissions: new Set(),
     aiBalances: new Map(),
     aiBalanceLoading: new Set(),
     aiBalanceErrors: new Map()

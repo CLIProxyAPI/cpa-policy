@@ -2,15 +2,16 @@
 
 源码仓库为 [CLIProxyAPI/cpa-policy](https://github.com/CLIProxyAPI/cpa-policy)，商店索引单独维护在 [CLIProxyAPI/Plugins-Store](https://github.com/CLIProxyAPI/Plugins-Store)。
 
-基于 `haowang02/cpa-plugin-key-billing` 1.4.2 二次开发，当前版本 **1.4.2-timezone.14**。插件标识改为 **`cpa-codex-controls`**，与原计费插件独立；管理页面名称继续为「账号设置」。
+基于 `haowang02/cpa-plugin-key-billing` 1.4.2 二次开发，当前版本 **1.4.3**。插件标识改为 **`cpa-codex-controls`**，与原计费插件独立；管理页面名称继续为「账号设置」。
 
 本版已删除 **API Key 管理及自助页面、分析、请求事件、订阅计划、路由规则、模型定价**，包括对应接口、计费/额度扣减、价格同步、调度器、存储代码和前端模块。不会再按插件原有订阅、价格或 API Key 规则拒绝请求。CPA 自身的访问密钥鉴权和上游供应商凭据仍由宿主管理。
 
 保留的功能：
 
-- **认证文件 / AI 供应商**：仅显示 Codex 类型的认证文件及 CPA `codex-api-key` 供应商，保留搜索、启用筛选、上游实时额度/余额查询，以及每行右侧「设置」按钮。
+- **认证文件 / AI 供应商**：显示 CPA 返回的全部认证类型和可用供应商列表，保留搜索、启用筛选、原生请求健康度、实时额度/余额查询，以及每行右侧「设置」按钮。供应商支持启停；OpenAI 兼容供应商按组启停。
 - **并发策略**：账号单独设置并发上限，默认为 0，不限制也不排队；正数上限使用全局账号队列容量和排队超时。队列容量 0 表示超限直接拒绝。流式请求占用名额直至完成，一个供应商的多个上游密钥分别限制。
 - **时区覆盖**：默认关闭；账号单独设置优先于全局。账号单独关闭时跳过全局覆盖。支持通过该账号代理检测出口位置并填充国家、地区、城市和时区。
+- **风控中心**：默认关闭；支持本地关键词/正则、Moderations 兼容审核 API、模型范围和分类阈值。提供仅观察/前置拦截、账号单独策略、草稿测试与脱敏记录，详见 [CONTENT-AUDIT.md](CONTENT-AUDIT.md)。
 - **错误事件、插件日志**：独立诊断数据库，分页浏览错误、日志等级筛选和清空日志。错误详情来自 CPA 的 `usage.handle`。
 - **管理页面**：管理密钥登录、中英文、主题、隐私遮罩及移动端布局。
 
@@ -22,7 +23,7 @@
 https://raw.githubusercontent.com/CLIProxyAPI/Plugins-Store/main/registry.json
 ```
 
-安装包和源码归档发布在本仓库的 [Releases](https://github.com/CLIProxyAPI/cpa-policy/releases)。详细配置、覆盖范围和限制见 [TIMEZONE.md](TIMEZONE.md)，安装和迁移见 [INSTALL.md](INSTALL.md)。当前尚未包含多供应商扩展、违禁内容检测或请求隐私过滤。
+安装包和源码归档发布在本仓库的 [Releases](https://github.com/CLIProxyAPI/cpa-policy/releases)。详细配置、覆盖范围和限制见 [TIMEZONE.md](TIMEZONE.md)，安装和迁移见 [INSTALL.md](INSTALL.md)。内容审计目前处理用户文本；请求正文隐私替换、自动封禁和通知尚未加入。
 
 需要支持 schema 6 的插件版 CPA，已用于本地验证的版本是 7.3.7。构建要求 Go 1.24+ 和 C 编译器：
 
@@ -34,7 +35,7 @@ CGO_ENABLED=1 go build -buildvcs=false -trimpath -ldflags='-s -w -X cpa-codex-co
 
 macOS 将输出扩展名改为 `.dylib`。新安装：停止 CPA，把对应平台库放入 `plugins.dir`，在 `plugins.configs.cpa-codex-controls` 下设置 `enabled: true`，再启动 CPA。每个插件目录只保留一份此 ID 的可加载库。自建商店源或从旧定制版迁移见 [INSTALL.md](INSTALL.md)。
 
-安装脚本使用 `CPA_PLUGIN_REPOSITORY=CLIProxyAPI/cpa-policy sh install.sh`，读取本仓库的 Release ZIP 和 `checksums.txt`。当前已验证的 .14 动态库保留构建时的仓库元数据占位值；商店下载来源由索引中的真实地址决定。后续 GitHub Release 构建会注入实际仓库地址。原作者链接只用于归属说明。
+安装脚本使用 `CPA_PLUGIN_REPOSITORY=CLIProxyAPI/cpa-policy sh install.sh`，读取本仓库的 Release ZIP 和 `checksums.txt`。发布包已注入本仓库地址；商店下载来源由索引中的资源地址决定。原作者链接只用于归属说明。
 
 ## 旧数据
 

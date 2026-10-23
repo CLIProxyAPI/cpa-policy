@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"cpa-codex-controls/internal/location"
+	"cpa-codex-controls/internal/moderation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,11 +24,12 @@ type Config struct {
 	LegacyStateFile    string                      `yaml:"state_file,omitempty"`
 	CustomLocation     location.Settings           `yaml:"custom_location"`
 	Concurrency        ConcurrencySettings         `yaml:"concurrency"`
+	Moderation         moderation.Config           `yaml:"moderation"`
 	CredentialPolicies location.CredentialPolicies `yaml:"credential_policies"`
 }
 
 func DefaultConfig() Config {
-	return Config{DiagnosticsFile: DefaultDiagnosticsFile, LegacyStateFile: DefaultLegacyStateFile, Concurrency: DefaultConcurrencySettings()}
+	return Config{DiagnosticsFile: DefaultDiagnosticsFile, LegacyStateFile: DefaultLegacyStateFile, Concurrency: DefaultConcurrencySettings(), Moderation: moderation.DefaultConfig()}
 }
 
 func DecodeConfig(raw []byte) (Config, error) {
@@ -64,6 +66,9 @@ func DecodeConfig(raw []byte) (Config, error) {
 		return Config{}, fmt.Errorf("credential_policies: %w", err)
 	}
 	cfg.CredentialPolicies = policies
+	if err := normalizeModeration(&cfg); err != nil {
+		return Config{}, err
+	}
 	compiled, err := cfg.CustomLocation.Compile()
 	if err != nil {
 		return Config{}, fmt.Errorf("custom_location: %w", err)

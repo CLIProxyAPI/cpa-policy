@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 type requestAdmission struct {
 	calls     int
 	completed bool
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 func (a *App) beginAdmission(requestID string) *requestAdmission {
@@ -21,7 +24,8 @@ func (a *App) beginAdmission(requestID string) *requestAdmission {
 	defer a.admissionsMu.Unlock()
 	admission := a.admissions[requestID]
 	if admission == nil {
-		admission = &requestAdmission{}
+		ctx, cancel := context.WithCancel(context.Background())
+		admission = &requestAdmission{ctx: ctx, cancel: cancel}
 		a.admissions[requestID] = admission
 	}
 	admission.calls++
@@ -35,6 +39,7 @@ func (a *App) endAdmission(requestID string, admission *requestAdmission) {
 	defer a.admissionsMu.Unlock()
 	admission.calls--
 	if admission.calls == 0 {
+		admission.cancel()
 		delete(a.admissions, strings.TrimSpace(requestID))
 	}
 }
@@ -55,7 +60,10 @@ func (a *App) interceptAfterAuth(raw []byte) ([]byte, error) {
 	}
 	admission := a.beginAdmission(req.RequestID)
 	defer a.endAdmission(req.RequestID, admission)
-	response := a.applyRequestLocation(req)
+	response := a.applyModeration(req, admission)
+	if !response.Terminate {
+		response = a.applyRequestLocation(req)
+	}
 	if !response.Terminate {
 		if refusal := a.admitUpstream(req, admission); refusal.Terminate {
 			response = refusal
@@ -79,6 +87,7 @@ func (a *App) completeRequest(raw []byte) ([]byte, error) {
 			defer a.admissionsMu.Unlock()
 			if admission := a.admissions[strings.TrimSpace(completion.RequestID)]; admission != nil {
 				admission.completed = true
+				admission.cancel()
 				a.signalAdmissionsLocked()
 			}
 			a.releaseUpstreamLocked(completion.RequestID)

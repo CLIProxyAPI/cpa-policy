@@ -19,6 +19,34 @@ function panelStoredValue(name) {
 (function () {
   const STORE_KEY = "cli-proxy-theme";
   const PLUGIN_STORE_KEY = "cpa-codex-controls:theme";
+  const HOST_THEME_TOKENS = [
+    "bg-primary",
+    "bg-secondary",
+    "bg-tertiary",
+    "bg-hover",
+    "floating-surface",
+    "floating-shadow",
+    "text-primary",
+    "text-secondary",
+    "text-tertiary",
+    "border-color",
+    "border-primary",
+    "border-hover",
+    "primary-color",
+    "primary-hover",
+    "primary-active",
+    "primary-contrast",
+    "error-color",
+    "shadow",
+    "success-badge-bg",
+    "success-badge-text",
+    "success-badge-border",
+    "failure-badge-bg",
+    "failure-badge-text",
+    "failure-badge-border",
+    "quota-medium-color",
+    "header-height"
+  ];
 
   function parentDocument() {
     if (window.parent === window) return null;
@@ -64,11 +92,28 @@ function panelStoredValue(name) {
     if (changed) { window.dispatchEvent(new CustomEvent("billing-theme-change", { detail: next })); }
   }
 
-  const sync = () => apply(currentTheme());
+  function syncHostTokens() {
+    const doc = parentDocument();
+    if (!doc) return;
+    const style = doc.defaultView.getComputedStyle(doc.documentElement);
+    // CPAMP already injects its own semantic tokens into plugin frames.
+    const cpamp = !!style.getPropertyValue("--app-surface").trim();
+    for (const name of HOST_THEME_TOKENS) {
+      const value = cpamp ? "" : style.getPropertyValue("--" + name).trim();
+      if (value) document.documentElement.style.setProperty("--" + name, value);
+      else document.documentElement.style.removeProperty("--" + name);
+    }
+  }
+  const sync = () => {
+    apply(currentTheme());
+    syncHostTokens();
+  };
   sync();
 
   const doc = parentDocument();
-  if (doc) { new MutationObserver(sync).observe(doc.documentElement, { attributes: true, attributeFilter: ["data-theme"] }); } else {
+  if (doc) {
+    new MutationObserver(sync).observe(doc.documentElement, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
+  } else {
     window.addEventListener("storage", (event) => {
       if (!event.key || event.key === STORE_KEY || event.key === PLUGIN_STORE_KEY) {
         selectedTheme = readPluginTheme();

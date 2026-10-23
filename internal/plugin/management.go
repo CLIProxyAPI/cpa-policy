@@ -26,6 +26,10 @@ type managementEndpoint struct {
 }
 
 var managementEndpoints = []managementEndpoint{
+	{"GET", "/moderation", "Read content audit configuration", (*App).moderationSettings},
+	{"POST", "/moderation/validate", "Validate content audit configuration", (*App).validateModeration},
+	{"POST", "/moderation/test", "Test content audit without forwarding or saving", (*App).testModeration},
+	{"GET", "/moderation/events", "List redacted content audit records", func(a *App, r ManagementRequest) ManagementResponse { return a.diagnosticPage(r, "moderation") }},
 	{"GET", "/concurrency", "Read default credential concurrency policy", (*App).concurrencySettings},
 	{"POST", "/concurrency/validate", "Validate default credential concurrency policy", (*App).validateConcurrency},
 	{"GET", "/credential-policies", "Read credential concurrency and timezone policies", (*App).credentialPolicies},

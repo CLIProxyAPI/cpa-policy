@@ -2,15 +2,16 @@
 
 Source and release assets are hosted in [CLIProxyAPI/cpa-policy](https://github.com/CLIProxyAPI/cpa-policy); the separate store registry is in [CLIProxyAPI/Plugins-Store](https://github.com/CLIProxyAPI/Plugins-Store).
 
-A customized fork of `haowang02/cpa-plugin-key-billing` 1.4.2, version **1.4.2-timezone.14**. The independent plugin ID is now **`cpa-codex-controls`**; the management menu remains **Account Controls**.
+A customized fork of `haowang02/cpa-plugin-key-billing` 1.4.2, version **1.4.3**. The independent plugin ID is now **`cpa-codex-controls`**; the management menu remains **Account Controls**.
 
 Removed: downstream API Key management/self-service, analytics, request events, subscription plans, routing rules, model pricing, and their backend/frontend/storage implementations. Plugin billing, subscription enforcement, price downloads, and scheduler hooks are gone. CPA still owns its access authentication and upstream credentials.
 
 Retained:
 
-- Codex-only Auth Files and AI Providers (`codex-api-key`), with search, enabled-only filtering, native quota/balance queries, and per-row settings.
+- Auth Files and AI Providers show all supported CPA credential types, with search, enabled-only filtering, native request health, quota/balance queries, and per-row settings. Provider enable/disable controls preserve existing configuration; OpenAI-compatible providers toggle as a group.
 - Per-account concurrency limits default to 0, bypassing limits and queuing. Positive limits use the global per-account queue capacity and timeout. Queue capacity 0 rejects excess requests immediately. Streaming slots last until completion; upstream provider keys have independent limits.
 - Opt-in location/timezone overrides. Individual account settings take precedence over the global default; explicit account-off preserves the original request. Detection fills country, region, city, and timezone through the account's configured proxy.
+- Content Audit defaults to off and supports keywords/regular expressions, a Moderations-compatible API, model filters, category thresholds, observe/block modes, account overrides, draft tests, and redacted records. See [CONTENT-AUDIT.md](CONTENT-AUDIT.md).
 - Upstream error events and plugin logs in an independent SQLite store.
 - Management-key login, English/Chinese, themes, privacy masks, and responsive layouts.
 
@@ -22,7 +23,7 @@ Add this source in the CPA plugin store:
 https://raw.githubusercontent.com/CLIProxyAPI/Plugins-Store/main/registry.json
 ```
 
-See [INSTALL.md](INSTALL.md) for installation and migration, and [TIMEZONE.md](TIMEZONE.md) for configuration, behavior, and limitations. Multi-provider support, prohibited-content detection, and request privacy filtering are not included in this version.
+See [INSTALL.md](INSTALL.md) for installation and migration, and [TIMEZONE.md](TIMEZONE.md) for configuration, behavior, and limitations. Content auditing covers user text. Request-body privacy replacement, automatic bans, and notifications are not included.
 
 Requires a plugin-enabled CPA supporting schema 6; local validation uses CPA 7.3.7. Build with Go 1.24+ and a C compiler:
 
@@ -34,7 +35,7 @@ CGO_ENABLED=1 go build -buildvcs=false -trimpath -ldflags='-s -w -X cpa-codex-co
 
 Use `.dylib` on macOS. Stop CPA, put the library in `plugins.dir`, enable `plugins.configs.cpa-codex-controls.enabled`, and restart. Keep one loadable library per ID. See [INSTALL.md](INSTALL.md) for custom stores and migration from the old custom build.
 
-Use `CPA_PLUGIN_REPOSITORY=CLIProxyAPI/cpa-policy sh install.sh` to download ZIP assets and checksums from this repository. The verified .14 binaries retain their build-time repository metadata placeholder; the store uses the actual download URLs in the registry. Future GitHub Release builds inject the actual repository. Upstream links remain attribution only.
+Use `CPA_PLUGIN_REPOSITORY=CLIProxyAPI/cpa-policy sh install.sh` to download ZIP assets and checksums from this repository. Release binaries include this repository in their metadata; the store uses the download URLs in the registry. Upstream links remain attribution only.
 
 ## Diagnostic history
 

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"cpa-codex-controls/internal/moderation"
 	"cpa-codex-controls/internal/settings"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ type App struct {
 	upstreamQueued   map[string]*upstreamWaiter
 	admissionSignal  chan struct{}
 	stopped          bool
+	moderationEngine moderation.Engine
 }
 
 func NewApp() *App {
@@ -76,6 +78,9 @@ func (a *App) Shutdown() {
 	a.store.Close()
 	a.admissionsMu.Lock()
 	a.stopped = true
+	for _, admission := range a.admissions {
+		admission.cancel()
+	}
 	a.signalAdmissionsLocked()
 	a.upstreamRequests = make(map[string]string)
 	a.upstreamCounts = make(map[string]int)
@@ -106,6 +111,7 @@ func registration() Registration {
 	return Registration{SchemaVersion: SchemaVersion, Metadata: Metadata{
 		Name: PluginName, Version: Version, Author: PluginName, GitHubRepository: GitHubRepository, Logo: pluginLogo,
 		ConfigFields: []ConfigField{
+			{Name: "moderation", Type: "object", Default: defaults.Moderation, Description: "Opt-in synchronous content audit. Credentials are referenced by environment variable; account policies may override global policy."},
 			{Name: "concurrency", Type: "object", Default: defaults.Concurrency, Description: "Bounded waiting queues and request-scoped timeouts for accounts with a positive concurrency limit."},
 			{Name: "custom_location", Type: "object", Default: defaults.CustomLocation, Description: "Opt-in global location. Disabled by default; individual account settings take precedence."},
 			{Name: "credential_policies", Type: "object", Default: map[string]any{}, Description: "Concurrency and timezone policies keyed by CPA auth_index. Zero concurrency means unlimited."},

@@ -6,7 +6,7 @@ function scheduleCredentialConcurrencyRefresh(immediate = false) {
   clearTimeout(credentialConcurrencyTimer);
   credentialConcurrencyTimer = null;
   const epoch = ++credentialConcurrencyRefreshEpoch;
-  if (!currentRole || activeTab() !== "auth-files" || document.hidden) return;
+  if (!currentRole || !["auth-files", "ai-providers"].includes(activeTab()) || document.hidden) return;
   credentialConcurrencyTimer = setTimeout(
     async () => {
       credentialConcurrencyTimer = null;
@@ -20,7 +20,10 @@ document.addEventListener("visibilitychange", () => scheduleCredentialConcurrenc
 function updateRefreshControls() {
   const loading =
     !!authFilesQueries.admin.task || !!aiProvidersQuery.task || !!credentialConcurrencyQuery.task ||
-    Object.values(diagnostics).some((item) => item.loading);
+    Object.values(credentialHealthQueries).some((query) => !!query.task) ||
+    Object.values(diagnostics).some((item) => item.loading) ||
+    (activeTab() === "moderation" && (moderationLoading || moderationSaving || moderationTesting || moderationEvents.loading)) ||
+    (activeTab() === "settings" && (locationLoading || locationSaving || locationDetecting || concurrencyLoading || concurrencySaving));
   document.querySelectorAll('[data-page-action="refresh"]').forEach((button) => (button.disabled = loading));
 }
 function privacyMasked() { return document.body.classList.contains("privacy-masked"); }
@@ -59,6 +62,8 @@ function showGate(_mode, error) {
   }
   authKey = "";
   currentRole = "";
+  savedLocationSettings = null;
+  updateLocationControls();
   savedConcurrencySettings = null;
   updateConcurrencyControls();
   scheduleCredentialConcurrencyRefresh();
@@ -124,7 +129,12 @@ for (const tab of tabs)
   };
 for (const button of document.querySelectorAll('[data-page-action="refresh"]')) {
   setActionIcon(button, "refresh", m("ui.refresh"));
-  button.onclick = () => guard(() => loadPage({ reload: true }));
+  button.onclick = () =>
+    guard(async () => {
+      if (activeTab() === "settings" && !(await confirmSettingsReload(locationSettingsDirty() || concurrencySettingsDirty()))) return;
+      if (activeTab() === "moderation" && !(await confirmSettingsReload(moderationSettingsDirty()))) return;
+      await loadPage({ reload: true });
+    });
 }
 $("privacy-mask").onclick = () => {
   document.body.classList.toggle("privacy-masked");

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,16 +11,19 @@ import (
 	"time"
 
 	"cpa-codex-controls/internal/location"
+	"cpa-codex-controls/internal/moderation"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 const Retention = 30 * 24 * time.Hour
 
 type Store struct {
-	mu       sync.RWMutex
-	cfg      Config
-	compiled *location.Compiled
-	db       *sql.DB
+	mu                 sync.RWMutex
+	cfg                Config
+	compiled           *location.Compiled
+	moderationGlobal   *moderation.Compiled
+	moderationAccounts map[string]*moderation.Compiled
+	db                 *sql.DB
 }
 
 func NewStore() *Store          { return &Store{cfg: DefaultConfig()} }
@@ -35,7 +37,7 @@ func (s *Store) LocationOverride() (*location.Compiled, location.Settings) {
 func (s *Store) CredentialPolicies() location.CredentialPolicies {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return maps.Clone(s.cfg.CredentialPolicies)
+	return s.cfg.CredentialPolicies.Clone()
 }
 func (s *Store) CredentialPolicySnapshot(index string) (location.CredentialPolicy, *location.Compiled, bool) {
 	s.mu.RLock()
@@ -58,6 +60,21 @@ func (s *Store) Configure(cfg Config) error {
 		return err
 	}
 	cfg.CredentialPolicies = policies
+	if err := normalizeModeration(&cfg); err != nil {
+		return err
+	}
+	global, _ := cfg.Moderation.Policy.Compile()
+	accounts := make(map[string]*moderation.Compiled)
+	for index, policy := range cfg.CredentialPolicies {
+		if policy.Moderation == nil {
+			continue
+		}
+		p := moderation.DefaultPolicy()
+		if policy.Moderation.Mode == "custom" {
+			p = *policy.Moderation.Policy
+		}
+		accounts[index], _ = p.Compile()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	db := s.db
@@ -80,6 +97,7 @@ func (s *Store) Configure(cfg Config) error {
 		s.db = db
 	}
 	s.cfg, s.compiled = cfg, compiled
+	s.moderationGlobal, s.moderationAccounts = global, accounts
 	return nil
 }
 
@@ -182,6 +200,11 @@ func (s *Store) append(kind, level string, payload any, at time.Time) error {
 	}
 	if _, err = tx.Exec("INSERT INTO diagnostics(at,kind,level,payload) VALUES(?,?,?,?)", at.UnixMilli(), kind, level, string(raw)); err != nil {
 		return err
+	}
+	if kind == "moderation" {
+		if _, err = tx.Exec("DELETE FROM diagnostics WHERE kind='moderation' AND id IN (SELECT id FROM diagnostics WHERE kind='moderation' ORDER BY id DESC LIMIT -1 OFFSET 10000)"); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

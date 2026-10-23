@@ -1,10 +1,10 @@
 # 安装与迁移
 
-本插件 ID 为 **`cpa-codex-controls`**，版本 **1.4.2-timezone.14**。管理菜单保持「账号设置」。包内动态库、接口路径和配置节点都使用新 ID，与原 `cpa-key-billing` 区分。
+本插件 ID 为 **`cpa-codex-controls`**，版本 **1.4.3**。管理菜单保持「账号设置」。包内动态库、接口路径和配置节点都使用新 ID，与原 `cpa-key-billing` 区分。
 
 ## 首次安装
 
-1. 选择与 CPA 服务器相同系统、架构的 ZIP。当前本地包提供 Linux amd64、Linux arm64、macOS arm64；Linux 构建面向 glibc 2.17+。
+1. 选择与 CPA 服务器相同系统、架构的 ZIP。商店提供 Linux amd64、Linux arm64、macOS arm64；Linux 构建面向 glibc 2.17+。
 2. 停止 CPA，将 ZIP 根目录中的 `cpa-codex-controls.so`（Linux）或 `cpa-codex-controls.dylib`（macOS）放入 `plugins.dir`。容器部署时，使用容器可见的挂载目录。
 3. 将以下内容合并到原 CPA 配置，再启动 CPA；已有的其他插件配置保留。
 
@@ -15,9 +15,12 @@ plugins:
   configs:
     cpa-codex-controls:
       enabled: true
+      priority: -100
 ```
 
 默认并发上限为 0，不限制、不排队；请求时区覆盖默认关闭。注册后通过宿主管理菜单进入「账号设置」，独立页面路径是 `/v0/resource/plugins/cpa-codex-controls/ui`。
+
+`priority: -100` 是建议的宿主配置：当其他插件优先级都大于 -100 时，本插件在同一请求拦截阶段靠后执行。CPA 按数值从大到小执行，后执行的插件仍可改写请求；这个值不能控制后续处理阶段或其他插件的独立请求。已有安装需要在 CPA 插件配置中修改该字段，更新插件包不会自动替换宿主保存的优先级。详见 [CPA 接口限制](TIMEZONE.md#cpa-接口限制)。
 
 ## 从插件商店安装
 
@@ -31,13 +34,13 @@ plugins:
     - https://raw.githubusercontent.com/CLIProxyAPI/Plugins-Store/main/registry.json
 ```
 
-从该源安装 `cpa-codex-controls`，根据宿主提示重启，确认注册版本。源和 Release ZIP 必须能从 CPA 服务器访问。当前版本提供 Linux amd64、Linux arm64、macOS arm64；不提供 Windows、macOS amd64 包。
+从该源安装 `cpa-codex-controls`，根据宿主提示重启，确认注册版本。源和 Release ZIP 必须能从 CPA 服务器访问。商店提供 Linux amd64、Linux arm64、macOS arm64；其他平台以 Release 的实际构建产物为准。
 
-安装资源发布在 `https://github.com/CLIProxyAPI/cpa-policy/releases/tag/v1.4.2-timezone.14`，三个平台 ZIP 内动态库均在根目录，另提供完整源码 ZIP 和 `checksums.txt`。
+安装资源发布在 `https://github.com/CLIProxyAPI/cpa-policy/releases/tag/v1.4.3`，各平台 ZIP 内动态库均在根目录，另提供完整源码 ZIP 和 `checksums.txt`。
 
 需要自行维护源时，复制商店仓库的 `registry.json`，将仓库、资源地址和署名改为自己的值；更新时同步修改版本、SHA256 和字节数，并保留许可证及原作者归属。
 
-当前已验证的 .14 动态库仍保留构建时的仓库元数据占位值；这不是安装更新源，实际下载来源由商店索引决定。后续 GitHub Release 工作流会注入实际仓库；手工构建时可加 `-ldflags='-X cpa-codex-controls/internal/plugin.GitHubRepository=https://github.com/CLIProxyAPI/cpa-policy'`。
+Release 工作流会注入实际源码仓库；实际安装下载来源由商店索引决定。手工构建时可加 `-ldflags='-X cpa-codex-controls/internal/plugin.GitHubRepository=https://github.com/CLIProxyAPI/cpa-policy'`。
 
 命令行安装：
 
@@ -45,9 +48,17 @@ plugins:
 CPA_PLUGIN_REPOSITORY=CLIProxyAPI/cpa-policy sh install.sh
 ```
 
-安装脚本读取本仓库的 `releases/latest`。Windows 脚本使用同名环境变量，但本版本未发布 Windows 包。
+安装脚本读取本仓库的 `releases/latest`。Windows 脚本使用同名环境变量；使用前确认 Release 包含对应架构的安装包。
 
 `127.0.0.1:18766` 是本地功能演示，不是宿主插件商店入口。
+
+## 从 1.4.2-timezone.14 更新
+
+在插件商店刷新本源，安装 1.4.3 更新，并按宿主提示重启 CPA。插件 ID 保持 `cpa-codex-controls`，已有并发、时区和诊断库配置继续使用，无需迁移 ID。
+
+新增内容审计默认关闭；认证文件和 AI 供应商页面会显示其他类型。并发和内容审计可用于对应受支持请求，时区覆盖仍只改写支持的结构化时区与位置字段。详见 [CONTENT-AUDIT.md](CONTENT-AUDIT.md)。
+
+手动换库前先停止 CPA 并备份配置、动态库和诊断库。宿主保存的 `store.version` / `store.release-tag` 若仍固定旧版本，需要同步为 `1.4.3` / `v1.4.3`，否则新库可能被跳过。商店正常更新会管理这些信息。
 
 ## 从旧定制版迁移
 

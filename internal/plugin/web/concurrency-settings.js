@@ -14,7 +14,8 @@ function updateConcurrencyControls() {
   const busy = concurrencySaving || concurrencyLoading;
   for (const [field] of CONCURRENCY_FIELDS) $("concurrency-" + field).disabled = busy || !savedConcurrencySettings;
   $("concurrency-save").disabled = busy || !savedConcurrencySettings;
-  $("concurrency-reload").disabled = busy;
+  $("concurrency-discard").disabled = busy || !concurrencySettingsDirty();
+  if (currentRole) updateRefreshControls();
 }
 function applyConcurrencySettings(response) {
   savedConcurrencySettings = requireConcurrencySettings(response.concurrency);
@@ -32,13 +33,18 @@ async function loadConcurrencySettings(reload = false) {
     applyConcurrencySettings(response);
   } catch (error) {
     if (error instanceof AuthError || error instanceof StaleRequestError) throw error;
-    savedConcurrencySettings = null;
     setText($("concurrency-error"), error.message || String(error));
     $("concurrency-error").classList.add("show");
   } finally {
     concurrencyLoading = false;
     updateConcurrencyControls();
   }
+}
+function concurrencySettingsDirty() {
+  return (
+    !!savedConcurrencySettings &&
+    CONCURRENCY_FIELDS.some(([field]) => $("concurrency-" + field).value !== String(savedConcurrencySettings[field]))
+  );
 }
 async function saveConcurrencySettings() {
   if (concurrencySaving || concurrencyLoading || !savedConcurrencySettings) return;
@@ -82,5 +88,14 @@ $("concurrency-form").addEventListener("submit", (event) => {
   event.preventDefault();
   guard(saveConcurrencySettings);
 });
-$("concurrency-reload").addEventListener("click", () => guard(() => loadConcurrencySettings(true)));
+$("concurrency-form").addEventListener("input", updateConcurrencyControls);
+$("concurrency-discard").addEventListener("click", () =>
+  guard(async () => {
+    if (!concurrencySettingsDirty() || !(await confirmSettingsReload(true, true))) return;
+    applyConcurrencySettings({ concurrency: savedConcurrencySettings });
+    $("concurrency-error").classList.remove("show");
+    updateConcurrencyControls();
+  })
+);
+setTextAttribute($("concurrency-discard"), "title", m("settings.discard_help"));
 updateConcurrencyControls();

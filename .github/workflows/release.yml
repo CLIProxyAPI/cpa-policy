@@ -260,13 +260,20 @@ jobs:
           test -s "$binary"
           file "$binary"
           version="${RELEASE_TAG#v}"
+          package_dir="$GITHUB_WORKSPACE/dist/package"
+          mkdir -p "$package_dir"
+          cp "$binary" README.md README.en.md INSTALL.md TIMEZONE.md CONTENT-AUDIT.md LICENSE NOTICE "$package_dir/"
+          cp -R licenses "$package_dir/"
 
           release_archive="cpa-codex-controls_${version}_${TARGET_OS}_${TARGET_ARCH}.tar.gz"
-          tar -czf "$release_archive" -C dist "cpa-codex-controls.${EXTENSION}"
+          tar -czf "$release_archive" -C "$package_dir" .
 
           store_archive="cpa-codex-controls_${version}_${TARGET_OS}_${TARGET_ARCH}.zip"
-          zip -j "$store_archive" "$binary"
-          test "$(unzip -Z1 "$store_archive")" = "cpa-codex-controls.${EXTENSION}"
+          (cd "$package_dir" && zip -r "$GITHUB_WORKSPACE/$store_archive" .)
+          unzip -t "$store_archive"
+          test "$(unzip -Z1 "$store_archive" | grep -E '\.(so|dylib|dll)$')" = "cpa-codex-controls.${EXTENSION}"
+          unzip -p "$store_archive" LICENSE | cmp - LICENSE
+          unzip -p "$store_archive" NOTICE | cmp - NOTICE
 
       - name: Verify and package Windows plugin
         if: matrix.os == 'windows'
@@ -293,12 +300,14 @@ jobs:
           $version = $env:RELEASE_TAG -replace '^v', ''
 
           $storeArchive = "cpa-codex-controls_$($version)_$($env:TARGET_OS)_$($env:TARGET_ARCH).zip"
-          Compress-Archive -Path $binary -DestinationPath $storeArchive -Force
+          $packageFiles = @($binary, "README.md", "README.en.md", "INSTALL.md", "TIMEZONE.md", "CONTENT-AUDIT.md", "LICENSE", "NOTICE", "licenses")
+          Compress-Archive -Path $packageFiles -DestinationPath $storeArchive -Force
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [IO.Compression.ZipFile]::OpenRead($storeArchive)
           try {
             $entries = @($archive.Entries | ForEach-Object FullName)
-            if ($entries.Count -ne 1 -or $entries[0] -ne "cpa-codex-controls.$($env:EXTENSION)") {
+            $libraries = @($entries | Where-Object { $_ -match '\.(so|dylib|dll)$' })
+            if ($libraries.Count -ne 1 -or $libraries[0] -ne "cpa-codex-controls.$($env:EXTENSION)" -or $entries -notcontains "LICENSE" -or $entries -notcontains "NOTICE") {
               throw "Unexpected archive contents: $($entries -join ', ')"
             }
           } finally {
@@ -338,10 +347,15 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Package tagged source
+        run: |
+          git archive --format=zip --prefix=cpa-policy/ \
+            -o "release-assets/cpa-codex-controls-${RELEASE_TAG}-source.zip" HEAD
+
       - name: Generate checksums
         working-directory: release-assets
         run: |
-          sha256sum cpa-codex-controls_*.tar.gz cpa-codex-controls_*.zip | sort > checksums.txt
+          sha256sum cpa-codex-controls_*.tar.gz cpa-codex-controls*.zip | sort > checksums.txt
 
       - name: Extract release notes
         run: |
