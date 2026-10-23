@@ -90,6 +90,48 @@ func TestRuntimeOnlyAuthFileDisablesQuotaWithoutLeakingDetails(t *testing.T) {
 	}
 }
 
+func TestAuthFileListHidesUnknownAuxiliaryFilesButKeepsOtherProviders(t *testing.T) {
+	app := newConfiguredApp(t)
+	app.SetHostCaller(func(method string, _ any) (json.RawMessage, error) {
+		if method != hostAuthList {
+			t.Fatalf("unexpected host method %q", method)
+		}
+		return json.RawMessage(`{"files":[
+			{"auth_index":"helper-1","name":".cpa-account-config-manager/ai-providers.json","type":"unknown"},
+			{"auth_index":"helper-2","name":".cpa-account-config-manager/model-policy.json","type":" UNKNOWN "},
+			{"auth_index":"helper-3","name":"settings.json","type":" "},
+			{"auth_index":"helper-4","name":"empty.json","type":"empty"},
+			{"auth_index":"valid-codex","name":"codex.json","type":"codex"},
+			{"auth_index":"valid-qwen","name":"qwen.json","type":"qwen"},
+			{"auth_index":"valid-gemini","name":"gemini.json","type":"gemini-cli","disabled":true},
+			{"auth_index":"valid-custom","name":"custom.json","type":"custom-provider"}
+		]}`), nil
+	})
+	response := app.authFiles(ManagementRequest{})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+	var payload authFileListResponse
+	if err := json.Unmarshal(response.Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Files) != 4 {
+		t.Fatalf("expected four actual credentials: %s", response.Body)
+	}
+	seen := map[string]bool{}
+	for _, file := range payload.Files {
+		if !strings.HasPrefix(file.AuthIndex, "valid-") {
+			t.Fatalf("auxiliary file was exposed: %+v", file)
+		}
+		seen[file.AuthIndex] = true
+	}
+	for _, index := range []string{"valid-codex", "valid-qwen", "valid-gemini", "valid-custom"} {
+		if !seen[index] {
+			t.Errorf("actual credential %q was hidden", index)
+		}
+	}
+}
+
 func TestPaidXAICredential(t *testing.T) {
 	if !paidXAICredential(map[string]any{"access_token": "e30.eyJ0aWVyIjoxfQ.sig"}) {
 		t.Fatal("paid JWT was not recognized")

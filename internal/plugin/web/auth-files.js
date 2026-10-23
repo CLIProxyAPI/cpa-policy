@@ -277,18 +277,23 @@ function renderAuthFileQuota(file) {
   const error = owner.authQuotaErrors.get(index);
   if (!result) {
     if (!file.quota_supported) return el("div", { class: "muted small", text: authQuotaRefreshTitle(file) });
-    if (!loading && !error)
-      return el("button", {
-        type: "button",
-        class: "auth-quota-prompt small",
-        text: m("ui.refresh_to_query_quota"),
-        disabled: !canRefreshAuthQuota(file) || ui.bulk.dataset.loading === "true",
-        onclick: () => guard(() => refreshAuthQuota(file))
-      });
+    if (loading || !error)
+      return el(
+        "button",
+        {
+          type: "button",
+          class: "auth-quota-prompt labeled-icon-button small" + (loading ? " loading" : ""),
+          "aria-busy": String(loading),
+          disabled: loading || !canRefreshAuthQuota(file) || ui.bulk.dataset.loading === "true",
+          onclick: () => guard(() => refreshAuthQuota(file))
+        },
+        loading && actionIcon("refresh"),
+        m(loading ? "ui.updating_quotas" : "ui.refresh_to_query_quota")
+      );
     return el(
       "div",
       { class: "auth-file-quota" },
-      loading ? el("div", { class: "muted small", text: m("ui.updating_quotas") }) : el("div", { class: "credential-error", text: error }),
+      el("div", { class: "auth-quota-content" }, el("div", { class: "credential-error", text: error })),
       renderAuthQuotaActions(file)
     );
   }
@@ -305,11 +310,15 @@ function renderAuthFileQuota(file) {
   return el(
     "div",
     { class: "auth-file-quota" },
-    summary.length ? el("div", { class: "auth-quota-summary" }, summary) : null,
-    error && el("div", { class: "credential-error", text: error }),
-    rows.length
-      ? el("div", { class: "auth-quota-list" }, rows.map((row) => renderQuotaRow(row)))
-      : el("div", { class: "muted small", text: m("ui.the_upstream_returned_no_displayable_quota") }),
+    el(
+      "div",
+      { class: "auth-quota-content" },
+      summary.length ? el("div", { class: "auth-quota-summary" }, summary) : null,
+      error && el("div", { class: "credential-error", text: error }),
+      rows.length
+        ? el("div", { class: "auth-quota-list" }, rows.map((row) => renderQuotaRow(row)))
+        : el("div", { class: "muted small", text: m("ui.the_upstream_returned_no_displayable_quota") })
+    ),
     renderAuthQuotaActions(file)
   );
 }
@@ -345,37 +354,38 @@ function renderAuthQuotaActions(file) {
   return el(
     "div",
     { class: "auth-quota-actions" },
-    resettable &&
-      el(
-        "button",
-        {
-          type: "button",
-          class: "labeled-icon-button small",
-          "aria-label": m("ui.reset_quota"),
-          ...hoverTooltipProps(
-            () => [el("span", { text: m("ui.reset_opportunities", { count: quota.rate_limit_reset_credits_available_count }) })],
-            true
-          ),
-          disabled: !canResetAuthQuota(file),
-          onclick: () => guard(() => resetAuthQuota(file))
-        },
-        actionIcon("rotate-cw-clock"),
-        m("ui.reset_quota")
-      ),
     el(
       "button",
       {
         type: "button",
-        class: "labeled-icon-button small" + (loading ? " loading" : ""),
+        class: "labeled-icon-button credential-icon-button" + (loading ? " loading" : ""),
         disabled: !canRefreshAuthQuota(file) || loading || ui.bulk.dataset.loading === "true",
         "aria-busy": String(loading),
         "aria-label": m("ui.update_quotas"),
         "data-tip": authQuotaRefreshTitle(file) || m("ui.update_quotas"),
         onclick: () => guard(() => refreshAuthQuota(file))
       },
-      actionIcon("refresh"),
-      m(loading ? "ui.updating_quotas" : "ui.update_quotas")
-    )
+      actionIcon("refresh")
+    ),
+    resettable &&
+      el(
+        "button",
+        {
+          type: "button",
+          class: "labeled-icon-button credential-icon-button",
+          "aria-label": m("ui.reset_quota"),
+          ...hoverTooltipProps(
+            () => [
+              el("div", { text: m("ui.reset_quota") }),
+              el("div", { text: m("ui.reset_opportunities", { count: quota.rate_limit_reset_credits_available_count }) })
+            ],
+            true
+          ),
+          disabled: !canResetAuthQuota(file),
+          onclick: () => guard(() => resetAuthQuota(file))
+        },
+        actionIcon("rotate-cw-clock")
+      )
   );
 }
 

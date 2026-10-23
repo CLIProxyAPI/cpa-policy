@@ -18,7 +18,7 @@ const (
 const (
 	PluginID   = "cpa-codex-controls"
 	PluginName = "cpa-codex-controls"
-	Version    = "1.4.3"
+	Version    = "1.4.4"
 
 	MenuLabel       = "Account Controls"
 	MenuDescription = "Manage credential concurrency, timezone overrides, content audit, and diagnostics"

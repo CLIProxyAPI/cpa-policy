@@ -203,6 +203,10 @@ func (a *App) listAuthFiles() ([]authFileView, error) {
 			continue
 		}
 		category := authCategory(file.Type)
+		// The host also lists auxiliary JSON files that are not credentials.
+		if category == "" || category == "unknown" || category == "empty" {
+			continue
+		}
 		quotaSupported, quotaReason := authQuotaAvailability(file, category)
 		views = append(views, authFileView{
 			AuthIndex: file.AuthIndex, Name: file.Name, Category: category, Email: strings.TrimSpace(file.Email),
