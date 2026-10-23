@@ -31,6 +31,22 @@ function moderationRuleID() {
   return "rule-" + Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function revealModerationField(input) {
+  for (let parent = input.parentElement; parent; parent = parent.parentElement) {
+    if (parent.tagName === "DETAILS") parent.open = true;
+    if (parent.classList.contains("moderation-rule-section")) {
+      parent.dataset.validationVisible = "true";
+      parent.hidden = false;
+    }
+  }
+  input.scrollIntoView({ block: "center" });
+  input.focus();
+}
+function moderationFieldError(input, message) {
+  revealModerationField(input);
+  throw new UIError(message);
+}
+
 function moderationPolicyEditor(prefix, value, onChange = () => {}) {
   const mode = moderationSelect(prefix + "-mode", ["off", "observe", "pre_block"]);
   const strategy = moderationSelect(prefix + "-strategy", ["keywords", "api", "keywords_and_api"]);
@@ -48,29 +64,67 @@ function moderationPolicyEditor(prefix, value, onChange = () => {}) {
     onclick: () => {
       addRule({ id: moderationRuleID(), name: "", kind: "keyword", pattern: "" });
       change();
+      rows.at(-1).pattern.focus();
     }
   });
+  const bulkText = el("textarea", { id: prefix + "-bulk-keywords", rows: 4, maxlength: 52000, placeholder: m("risk.bulk_placeholder") });
+  const bulkNotice = el("p", { class: "small muted", role: "status" });
+  const bulkAdd = el("button", {
+    type: "button",
+    text: m("risk.bulk_add"),
+    onclick: () => {
+      try {
+        const existing = new Set(rows.filter((row) => row.kind.value === "keyword").map((row) => row.pattern.value.toLowerCase()));
+        const pending = [];
+        for (const text of bulkText.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
+          if (new TextEncoder().encode(text).length > 512) throw new UIError(m("risk.bulk_too_long"));
+          const key = text.toLowerCase();
+          if (!existing.has(key)) {
+            existing.add(key);
+            pending.push(text);
+          }
+        }
+        if (rows.filter((row) => row.name.value.trim() || row.pattern.value.trim()).length + pending.length > 100)
+          throw new UIError(m("risk.rules_limit"));
+        if (!bulkText.value.trim()) {
+          bulkText.focus();
+          return;
+        }
+        rows.filter((row) => !row.name.value.trim() && !row.pattern.value.trim()).forEach((row) => row.node.remove());
+        rows = rows.filter((row) => row.name.value.trim() || row.pattern.value.trim());
+        pending.forEach((pattern) => addRule({ id: moderationRuleID(), name: "", kind: "keyword", pattern }));
+        bulkText.value = "";
+        setText(bulkNotice, m("risk.bulk_added", { count: pending.length }));
+        change();
+      } catch (error) { setText(bulkNotice, error.message); }
+    }
+  });
+  const bulk = el(
+    "details",
+    { class: "moderation-bulk" },
+    el("summary", { text: m("risk.bulk_title") }),
+    moderationField("bulk_keywords", bulkText, "bulk_help"),
+    bulkAdd,
+    bulkNotice
+  );
+  const empty = el("p", { class: "small muted", text: m("risk.rules_empty") });
+  const strategyHelp = el("p", { class: "small muted moderation-strategy-help" });
   const modelField = moderationField("models", models, "models_help");
   const ruleSection = el(
     "section",
     { class: "moderation-rule-section" },
     el("div", { class: "row spread" }, el("h3", { text: m("risk.rules") }), add),
     el("p", { class: "small muted", text: m("risk.rules_help") }),
-    rules
+    empty,
+    rules,
+    bulk
   );
-  const node = el(
-    "div",
-    { class: "moderation-policy-editor" },
-    el(
-      "div",
-      { class: "moderation-grid" },
-      moderationField("mode", mode, "mode_help"),
-      moderationField("strategy", strategy),
-      moderationField("scope", scope, "scope_help"),
-      moderationField("model_mode", filter)
-    ),
+  const advanced = el(
+    "details",
+    { class: "moderation-advanced" },
+    el("summary", { text: m("risk.advanced") }),
+    el("div", { class: "moderation-grid" }, moderationField("scope", scope, "scope_help"), moderationField("model_mode", filter)),
     modelField,
-    ruleSection,
     el(
       "div",
       { class: "moderation-grid" },
@@ -84,6 +138,14 @@ function moderationPolicyEditor(prefix, value, onChange = () => {}) {
       )
     )
   );
+  const node = el(
+    "div",
+    { class: "moderation-policy-editor" },
+    el("div", { class: "moderation-grid" }, moderationField("mode", mode, "mode_help"), moderationField("strategy", strategy)),
+    strategyHelp,
+    ruleSection,
+    advanced
+  );
   function addRule(rule) {
     const name = el("input", { value: rule.name, maxlength: 128, "aria-label": m("risk.rule_name"), placeholder: m("risk.rule_name") });
     const kind = moderationSelect(null, ["keyword", "regex"]);
@@ -92,7 +154,6 @@ function moderationPolicyEditor(prefix, value, onChange = () => {}) {
     const pattern = el("input", {
       value: rule.pattern,
       maxlength: 512,
-      required: true,
       "aria-label": m("risk.pattern"),
       placeholder: m("risk.pattern"),
       autocomplete: "off",
@@ -120,14 +181,18 @@ function moderationPolicyEditor(prefix, value, onChange = () => {}) {
   function update() {
     modelField.hidden = filter.value === "all";
     models.required = filter.value !== "all";
-    ruleSection.hidden = strategy.value === "api";
-    for (const row of rows) row.pattern.required = strategy.value !== "api";
+    ruleSection.hidden = strategy.value === "api" && !ruleSection.dataset.validationVisible;
+    empty.hidden = rows.length > 0;
+    setText(strategyHelp, m(strategy.value === "keywords" ? "risk.local_help" : "risk.external_help"));
     add.disabled = disabled || rows.length >= 100;
+    bulkAdd.disabled = disabled;
+    bulkText.disabled = disabled;
   }
   function change() {
     update();
     onChange();
   }
+  strategy.addEventListener("change", () => { delete ruleSection.dataset.validationVisible; });
   node.addEventListener("input", change);
   node.addEventListener("change", change);
   const editor = {
@@ -138,10 +203,28 @@ function moderationPolicyEditor(prefix, value, onChange = () => {}) {
       scope: scope.value,
       model_mode: filter.value,
       models: models.value.split("\n").map((s) => s.trim()).filter(Boolean),
-      rules: rows.map((row) => ({ id: row.id, name: row.name.value.trim(), kind: row.kind.value, pattern: row.pattern.value })),
+      rules: rows.filter((row) => row.name.value.trim() || row.pattern.value.trim())
+        .map((row) => ({ id: row.id, name: row.name.value.trim(), kind: row.kind.value, pattern: row.pattern.value })),
       failure_action: failure.value,
       log_excerpt: excerpt.checked
     }),
+    hasPendingInput: () => !!bulkText.value.trim(),
+    revealError: (error) => {
+      if (!error.messageKey?.startsWith("risk.validation_rule_")) return;
+      const index = Number(error.messageParams?.v0) - 1;
+      const row = rows.filter((row) => row.name.value.trim() || row.pattern.value.trim())[index];
+      if (row) revealModerationField(row.pattern);
+    },
+    validate: () => {
+      if (bulkText.value.trim()) moderationFieldError(bulkText, m("risk.bulk_pending"));
+      const policy = editor.getValue();
+      if (policy.mode !== "off" && policy.strategy === "keywords" && !policy.rules.length)
+        moderationFieldError(add, m("risk.rules_required"));
+      if (policy.model_mode !== "all" && !policy.models.length) moderationFieldError(models, m("risk.models_required"));
+      for (const row of rows) {
+        if (row.name.value.trim() && !row.pattern.value.trim()) moderationFieldError(row.pattern, m("risk.pattern_required"));
+      }
+    },
     setValue: (p) => {
       mode.value = p.mode;
       strategy.value = p.strategy;
@@ -153,6 +236,10 @@ function moderationPolicyEditor(prefix, value, onChange = () => {}) {
       rows = [];
       rules.replaceChildren();
       p.rules.forEach(addRule);
+      bulkText.value = "";
+      bulkNotice.replaceChildren();
+      delete ruleSection.dataset.validationVisible;
+      advanced.open = p.scope !== "latest_user" || p.model_mode !== "all" || p.failure_action !== "block" || p.log_excerpt;
       update();
     },
     setDisabled: (busy) => {
@@ -181,6 +268,8 @@ function credentialModerationEditor(original, global) {
     node,
     getValue: () =>
       mode.value === "inherit" ? null : mode.value === "off" ? { mode: "off" } : { mode: "custom", policy: editor.getValue() },
+    validate: () => { if (mode.value === "custom") editor.validate(); },
+    revealError: (error) => editor.revealError(error),
     setDisabled: (value) => {
       disabled = value;
       mode.disabled = value;
@@ -190,18 +279,20 @@ function credentialModerationEditor(original, global) {
 }
 
 let savedModeration = null;
+let moderationKeyConfigured = false;
 let moderationLoading = false;
 let moderationSaving = false;
 let moderationTesting = false;
 const moderationEvents = { entries: [], next: "", loading: false, loaded: false, error: "" };
 const globalModerationEditor = moderationPolicyEditor("moderation", defaultModerationPolicy(), moderationDraftChanged);
 $("moderation-policy-host").append(globalModerationEditor.node);
+const moderationAPIAuth = moderationSelect("moderation-api-auth", ["env_key", "no_auth"]);
 const moderationAPIFields = {
   url: el("input", { id: "moderation-api-url", type: "url", maxlength: 2048, placeholder: "https://audit.example.com/v1/moderations" }),
   model: el("input", { id: "moderation-api-model", maxlength: 128 }),
   key_env: el("input", { id: "moderation-api-key-env", maxlength: 128, autocomplete: "off", spellcheck: "false" }),
-  timeout_ms: el("input", { id: "moderation-api-timeout", type: "number", min: 100, max: 10000, step: 100 }),
-  max_in_flight: el("input", { id: "moderation-api-concurrency", type: "number", min: 1, max: 64, step: 1 })
+  timeout_ms: el("input", { id: "moderation-api-timeout", type: "number", min: 100, max: 10000, step: 1, required: true }),
+  max_in_flight: el("input", { id: "moderation-api-concurrency", type: "number", min: 1, max: 64, step: 1, required: true })
 };
 const moderationThresholds = el("textarea", {
   id: "moderation-api-thresholds",
@@ -210,46 +301,109 @@ const moderationThresholds = el("textarea", {
   placeholder: "violence=0.8\nsexual=0.9",
   spellcheck: "false"
 });
+const moderationAPIKeyField = moderationField("api_key_env", moderationAPIFields.key_env, "api_key_help");
+const moderationAPIAdvanced = el(
+  "details",
+  { class: "moderation-advanced" },
+  el("summary", { text: m("risk.api_advanced") }),
+  el(
+    "div",
+    { class: "moderation-grid" },
+    moderationField("api_timeout_ms", moderationAPIFields.timeout_ms),
+    moderationField("api_max_in_flight", moderationAPIFields.max_in_flight)
+  ),
+  moderationField("thresholds", moderationThresholds, "thresholds_help")
+);
+const moderationAPITest = el("button", { type: "button", text: m("risk.api_test"), onclick: () => guard(testModerationAPI) });
+const moderationAPIResult = el("div", { id: "moderation-api-result", "aria-live": "polite" });
 $("moderation-api-host").append(
   el(
     "div",
     { class: "moderation-grid" },
-    ...Object.entries(moderationAPIFields).map(([key, input]) =>
-      moderationField("api_" + key, input, key === "key_env" ? "api_key_help" : null)
-    )
+    moderationField("api_url", moderationAPIFields.url),
+    moderationField("api_model", moderationAPIFields.model),
+    moderationField("api_auth", moderationAPIAuth),
+    moderationAPIKeyField
   ),
-  moderationField("thresholds", moderationThresholds, "thresholds_help")
+  moderationAPIAdvanced,
+  el(
+    "div",
+    { class: "row moderation-api-actions" },
+    moderationAPITest,
+    el("span", { class: "small muted", text: m("risk.api_test_help") })
+  ),
+  moderationAPIResult
 );
+moderationAPIAuth.addEventListener("change", () => {
+  if (moderationAPIAuth.value === "env_key" && !moderationAPIFields.key_env.value)
+    moderationAPIFields.key_env.value = "CPA_POLICY_MODERATION_API_KEY";
+  moderationDraftChanged();
+});
+$("moderation-strategy").addEventListener("change", () => {
+  $("moderation-api-settings").open = $("moderation-strategy").value !== "keywords";
+});
+$("moderation-api-host").addEventListener("input", () => moderationAPIResult.replaceChildren());
+$("moderation-api-host").addEventListener("change", () => moderationAPIResult.replaceChildren());
 
-function moderationDraft() {
+function moderationAPIDraft() {
   const thresholds = {};
   for (const line of moderationThresholds.value.split("\n").map((s) => s.trim()).filter(Boolean)) {
     const match = /^([a-z][a-z0-9_/-]*)\s*=\s*(0(?:\.\d+)?|1(?:\.0+)?)$/.exec(line);
-    if (!match || Object.hasOwn(thresholds, match[1])) throw new UIError(m("risk.threshold_invalid"));
+    if (!match || Object.hasOwn(thresholds, match[1]))
+      throw Object.assign(new UIError(m("risk.threshold_invalid")), { focusTarget: moderationThresholds });
     thresholds[match[1]] = Number(match[2]);
   }
   return {
-    ...globalModerationEditor.getValue(),
-    api: {
-      ...Object.fromEntries(
-        Object.entries(moderationAPIFields).map(([key, input]) => [key, input.type === "number" ? Number(input.value) : input.value.trim()])
-      ),
-      thresholds
-    }
+    ...Object.fromEntries(
+      Object.entries(moderationAPIFields).map(([key, input]) => [key, input.type === "number" ? Number(input.value) : input.value.trim()])
+    ),
+    key_env: moderationAPIAuth.value === "no_auth" ? "" : moderationAPIFields.key_env.value.trim(),
+    thresholds
   };
+}
+function moderationDraft() { return { ...globalModerationEditor.getValue(), api: moderationAPIDraft() }; }
+function validateModerationAPI(required) {
+  if (required && !moderationAPIFields.url.value.trim()) moderationFieldError(moderationAPIFields.url, m("risk.api_url_required"));
+  if (required && !moderationAPIFields.model.value.trim()) moderationFieldError(moderationAPIFields.model, m("risk.api_model_required"));
+  if (moderationAPIAuth.value === "env_key" && !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(moderationAPIFields.key_env.value.trim()))
+    moderationFieldError(moderationAPIFields.key_env, m("risk.env_invalid"));
+  for (const input of Object.values(moderationAPIFields)) {
+    if (!input.disabled && !input.validity.valid) {
+      revealModerationField(input);
+      input.reportValidity();
+      return false;
+    }
+  }
+  return true;
 }
 function moderationSettingsDirty() {
   if (!savedModeration) return false;
-  try { return JSON.stringify(moderationDraft()) !== JSON.stringify(savedModeration); } catch (_) { return true; }
+  try {
+    return globalModerationEditor.hasPendingInput() || JSON.stringify(moderationDraft()) !== JSON.stringify(savedModeration);
+  } catch (_) { return true; }
 }
 function moderationDraftChanged() {
   $("moderation-test-result").replaceChildren();
+  $("moderation-error").classList.remove("show");
   updateModerationControls();
 }
 function updateModerationControls() {
   const busy = moderationLoading || moderationSaving || moderationTesting;
   globalModerationEditor.setDisabled(busy || !savedModeration);
-  for (const input of [...Object.values(moderationAPIFields), moderationThresholds]) input.disabled = busy || !savedModeration;
+  for (const input of [...Object.values(moderationAPIFields), moderationThresholds, moderationAPIAuth])
+    input.disabled = busy || !savedModeration;
+  moderationAPIKeyField.hidden = moderationAPIAuth.value === "no_auth";
+  moderationAPIFields.key_env.disabled = busy || !savedModeration || moderationAPIKeyField.hidden;
+  moderationAPITest.disabled = busy || !savedModeration;
+  const key = moderationAPIAuth.value === "no_auth" ? "" : moderationAPIFields.key_env.value.trim();
+  setText(
+    $("moderation-key-status"),
+    m(
+      !key
+        ? "risk.key_not_needed"
+        : key !== savedModeration?.api.key_env ? "risk.key_unsaved" : moderationKeyConfigured ? "risk.key_ready" : "risk.key_missing"
+    )
+  );
   $("moderation-save").disabled = busy || !savedModeration;
   $("moderation-discard").disabled = busy || !moderationSettingsDirty();
   $("moderation-test-run").disabled = busy || !savedModeration;
@@ -262,9 +416,14 @@ function applyModerationSettings(response) {
   requireObject(config.api, m("risk.api_settings"));
   globalModerationEditor.setValue(config);
   for (const [key, input] of Object.entries(moderationAPIFields)) input.value = config.api[key];
+  moderationAPIAuth.value = config.api.key_env ? "env_key" : "no_auth";
+  moderationKeyConfigured = !!response.api_key_configured;
+  moderationAPIAdvanced.open =
+    config.api.timeout_ms !== 3000 || config.api.max_in_flight !== 8 || Object.keys(config.api.thresholds).length > 0;
+  $("moderation-api-settings").open = config.strategy !== "keywords";
+  moderationAPIResult.replaceChildren();
   moderationThresholds.value = Object.entries(config.api.thresholds).map(([key, value]) => `${key}=${value}`).join("\n");
   savedModeration = moderationDraft();
-  setText($("moderation-key-status"), m(response.api_key_configured ? "risk.key_ready" : "risk.key_missing"));
 }
 async function loadModerationSettings(reload = false) {
   if (moderationLoading || moderationSaving || (savedModeration && !reload)) return;
@@ -276,6 +435,7 @@ async function loadModerationSettings(reload = false) {
     $("moderation-error").classList.remove("show");
   } catch (error) {
     if (error instanceof AuthError || error instanceof StaleRequestError) throw error;
+    if (error.focusTarget) revealModerationField(error.focusTarget);
     setText($("moderation-error"), error.message);
     $("moderation-error").classList.add("show");
   } finally {
@@ -285,11 +445,14 @@ async function loadModerationSettings(reload = false) {
 }
 async function saveModerationSettings() {
   if (moderationSaving || moderationLoading || !savedModeration) return;
-  moderationSaving = true;
-  updateModerationControls();
   const generation = sessionGeneration;
   try {
+    globalModerationEditor.validate();
+    const policy = globalModerationEditor.getValue();
+    if (!validateModerationAPI(policy.mode !== "off" && policy.strategy !== "keywords")) return;
     const draft = moderationDraft();
+    moderationSaving = true;
+    updateModerationControls();
     const latest = (await plugin("GET", "/moderation")).moderation;
     if (JSON.stringify(latest) !== JSON.stringify(savedModeration)) throw new UIError(m("risk.changed"));
     const validated = (await plugin("POST", "/moderation/validate", draft, { command: true })).moderation;
@@ -310,6 +473,10 @@ async function saveModerationSettings() {
     notify(m("risk.saved"));
   } catch (error) {
     if (error instanceof AuthError || error instanceof StaleRequestError) throw error;
+    moderationSaving = false;
+    updateModerationControls();
+    globalModerationEditor.revealError(error);
+    if (error.focusTarget) revealModerationField(error.focusTarget);
     setText($("moderation-error"), error.message);
     $("moderation-error").classList.add("show");
   } finally {
@@ -337,21 +504,56 @@ function moderationResultNode(result) {
 }
 async function testModerationDraft() {
   if (moderationTesting || !savedModeration) return;
-  moderationTesting = true;
-  updateModerationControls();
   const target = $("moderation-test-result");
-  target.replaceChildren(el("p", { text: m("ui.loading") }));
   try {
+    globalModerationEditor.validate();
+    const policy = globalModerationEditor.getValue();
+    if (!validateModerationAPI(policy.mode !== "off" && policy.strategy !== "keywords")) return;
+    const config = moderationDraft();
+    moderationTesting = true;
+    updateModerationControls();
+    target.replaceChildren(el("p", { text: m("ui.loading") }));
     const { result } = await plugin(
       "POST",
       "/moderation/test",
-      { config: moderationDraft(), text: $("moderation-test-text").value, model: $("moderation-test-model").value.trim() },
+      { config, text: $("moderation-test-text").value, model: $("moderation-test-model").value.trim() },
       { command: true, timeoutMS: 15000 }
     );
     target.replaceChildren(moderationResultNode(result));
   } catch (error) {
     if (error instanceof AuthError || error instanceof StaleRequestError) throw error;
+    moderationTesting = false;
+    updateModerationControls();
+    globalModerationEditor.revealError(error);
+    if (error.focusTarget) revealModerationField(error.focusTarget);
     target.replaceChildren(el("p", { class: "notice err show", text: error.message }));
+  } finally {
+    moderationTesting = false;
+    updateModerationControls();
+  }
+}
+async function testModerationAPI() {
+  if (moderationTesting || moderationSaving || !savedModeration) return;
+  try {
+    if (!validateModerationAPI(true)) return;
+    const config = { ...defaultModerationPolicy(), mode: "observe", strategy: "api", api: moderationAPIDraft() };
+    moderationTesting = true;
+    updateModerationControls();
+    moderationAPIResult.replaceChildren(el("p", { text: m("ui.loading") }));
+    const { result } = await plugin(
+      "POST",
+      "/moderation/test",
+      { config, text: "CPA Policy connection test." },
+      { command: true, timeoutMS: 15000 }
+    );
+    const ok = result.status === "passed" || result.status === "flagged";
+    moderationAPIResult.replaceChildren(
+      el("p", { class: "notice show " + (ok ? "ok" : "err"), text: ok ? m("risk.api_test_ok") : m("risk.reason_" + result.reason) })
+    );
+  } catch (error) {
+    if (error instanceof AuthError || error instanceof StaleRequestError) throw error;
+    if (error.focusTarget) revealModerationField(error.focusTarget);
+    moderationAPIResult.replaceChildren(el("p", { class: "notice err show", text: error.message }));
   } finally {
     moderationTesting = false;
     updateModerationControls();
@@ -408,6 +610,8 @@ function renderModerationEvents() {
 }
 function resetModeration() {
   savedModeration = null;
+  moderationKeyConfigured = false;
+  moderationAPIResult.replaceChildren();
   globalModerationEditor.setValue(defaultModerationPolicy());
   $("moderation-test-text").value = "";
   $("moderation-test-result").replaceChildren();
@@ -415,6 +619,7 @@ function resetModeration() {
   renderModerationEvents();
   updateModerationControls();
 }
+$("moderation-form").addEventListener("invalid", (event) => revealModerationField(event.target), true);
 $("moderation-form").addEventListener("submit", (event) => {
   event.preventDefault();
   guard(saveModerationSettings);

@@ -189,6 +189,8 @@ async function api(method, path, body, opts) {
           : m("ui.server_error_http_value", { v0: resp.status }))
     );
     error.status = resp.status;
+    error.messageKey = typeof payload?.error?.message_key === "string" ? payload.error.message_key : "";
+    error.messageParams = payload?.error?.message_params;
     throw error;
   }
   return payload;

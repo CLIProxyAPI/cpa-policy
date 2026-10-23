@@ -2,7 +2,7 @@
 package moderation
 
 import (
-	"fmt"
+	"cpa-codex-controls/internal/messages"
 	"maps"
 	"math"
 	"net"
@@ -109,22 +109,22 @@ func (p Policy) Compile() (*Compiled, error) {
 		p.FailureAction = "block"
 	}
 	if !slices.Contains([]string{"off", "observe", "pre_block"}, p.Mode) {
-		return nil, fmt.Errorf("moderation mode must be off, observe, or pre_block")
+		return nil, messages.Errorf("moderation mode must be off, observe, or pre_block")
 	}
 	if !slices.Contains([]string{"keywords", "api", "keywords_and_api"}, p.Strategy) {
-		return nil, fmt.Errorf("moderation strategy must be keywords, api, or keywords_and_api")
+		return nil, messages.Errorf("moderation strategy must be keywords, api, or keywords_and_api")
 	}
 	if !slices.Contains([]string{"latest_user", "all_users"}, p.Scope) {
-		return nil, fmt.Errorf("moderation scope must be latest_user or all_users")
+		return nil, messages.Errorf("moderation scope must be latest_user or all_users")
 	}
 	if !slices.Contains([]string{"all", "include", "exclude"}, p.ModelMode) {
-		return nil, fmt.Errorf("moderation model_mode must be all, include, or exclude")
+		return nil, messages.Errorf("moderation model_mode must be all, include, or exclude")
 	}
 	if p.FailureAction != "allow" && p.FailureAction != "block" {
-		return nil, fmt.Errorf("moderation failure_action must be allow or block")
+		return nil, messages.Errorf("moderation failure_action must be allow or block")
 	}
 	if len(p.Rules) > 100 || len(p.Models) > 100 {
-		return nil, fmt.Errorf("moderation supports at most 100 rules and 100 model names")
+		return nil, messages.Errorf("moderation supports at most 100 rules and 100 model names")
 	}
 	p = p.Clone()
 	if p.Rules == nil {
@@ -136,21 +136,21 @@ func (p Policy) Compile() (*Compiled, error) {
 	for i, model := range p.Models {
 		p.Models[i] = strings.TrimSpace(model)
 		if p.Models[i] == "" || len(p.Models[i]) > 256 {
-			return nil, fmt.Errorf("moderation model names must contain 1–256 bytes")
+			return nil, messages.Errorf("moderation model names must contain 1–256 bytes")
 		}
 	}
 	if p.ModelMode != "all" && len(p.Models) == 0 {
-		return nil, fmt.Errorf("moderation model filter requires at least one model name")
+		return nil, messages.Errorf("moderation model filter requires at least one model name")
 	}
 	c := &Compiled{Policy: p}
 	seen := map[string]bool{}
 	for i, rule := range p.Rules {
 		if !identifier.MatchString(rule.ID) || seen[rule.ID] {
-			return nil, fmt.Errorf("moderation rule %d requires a unique identifier", i+1)
+			return nil, messages.Errorf("moderation rule %d requires a unique identifier", i+1)
 		}
 		seen[rule.ID] = true
 		if len(rule.Name) > 128 || len(rule.Pattern) > 512 || strings.TrimSpace(rule.Pattern) == "" {
-			return nil, fmt.Errorf("moderation rule %d has an invalid name or pattern (maximum 128 / 512 bytes)", i+1)
+			return nil, messages.Errorf("moderation rule %d has an invalid name or pattern (maximum 128 / 512 bytes)", i+1)
 		}
 		pattern := rule.Pattern
 		switch rule.Kind {
@@ -158,19 +158,19 @@ func (p Policy) Compile() (*Compiled, error) {
 			pattern = "(?i)" + regexp.QuoteMeta(pattern)
 		case "regex":
 		default:
-			return nil, fmt.Errorf("moderation rule %d kind must be keyword or regex", i+1)
+			return nil, messages.Errorf("moderation rule %d kind must be keyword or regex", i+1)
 		}
 		r, err := regexp.Compile(pattern)
 		if err != nil {
-			return nil, fmt.Errorf("moderation rule %d contains an invalid regular expression", i+1)
+			return nil, messages.Errorf("moderation rule %d contains an invalid regular expression", i+1)
 		}
 		if r.MatchString("") {
-			return nil, fmt.Errorf("moderation rule %d must not match empty text", i+1)
+			return nil, messages.Errorf("moderation rule %d must not match empty text", i+1)
 		}
 		c.patterns = append(c.patterns, r)
 	}
 	if p.Mode != "off" && p.Strategy == "keywords" && len(p.Rules) == 0 {
-		return nil, fmt.Errorf("keyword moderation requires at least one rule")
+		return nil, messages.Errorf("keyword moderation requires at least one rule")
 	}
 	return c, nil
 }
@@ -183,7 +183,7 @@ func (o *Override) Normalize() (*Override, error) {
 		return &Override{Mode: "off"}, nil
 	}
 	if o.Mode != "custom" || o.Policy == nil {
-		return nil, fmt.Errorf("moderation override requires inherit, off, or custom with a policy")
+		return nil, messages.Errorf("moderation override requires inherit, off, or custom with a policy")
 	}
 	p, err := o.Policy.Compile()
 	if err != nil {
@@ -208,25 +208,25 @@ func (c Config) Normalize() (Config, error) {
 		c.API.MaxInFlight = 8
 	}
 	if c.API.TimeoutMS < 100 || c.API.TimeoutMS > 10000 {
-		return c, fmt.Errorf("moderation API timeout_ms must be between 100 and 10000")
+		return c, messages.Errorf("moderation API timeout_ms must be between 100 and 10000")
 	}
 	if c.API.MaxInFlight < 1 || c.API.MaxInFlight > 64 {
-		return c, fmt.Errorf("moderation API max_in_flight must be between 1 and 64")
+		return c, messages.Errorf("moderation API max_in_flight must be between 1 and 64")
 	}
 	if c.API.KeyEnv != "" && !envName.MatchString(c.API.KeyEnv) {
-		return c, fmt.Errorf("moderation API key_env must be an environment variable name")
+		return c, messages.Errorf("moderation API key_env must be an environment variable name")
 	}
 	if len(c.API.Model) > 128 {
-		return c, fmt.Errorf("moderation API model must not exceed 128 bytes")
+		return c, messages.Errorf("moderation API model must not exceed 128 bytes")
 	}
 	if c.API.URL != "" {
 		u, parseErr := url.Parse(c.API.URL)
 		if parseErr != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(c.API.URL) > 2048 {
-			return c, fmt.Errorf("moderation API URL must be an absolute URL without credentials, query, or fragment")
+			return c, messages.Errorf("moderation API URL must be an absolute URL without credentials, query, or fragment")
 		}
 		ip := net.ParseIP(u.Hostname())
 		if u.Scheme != "https" && !(u.Scheme == "http" && ip != nil && ip.IsLoopback()) {
-			return c, fmt.Errorf("moderation API URL requires HTTPS (HTTP is allowed only on loopback)")
+			return c, messages.Errorf("moderation API URL requires HTTPS (HTTP is allowed only on loopback)")
 		}
 	}
 	if c.API.Thresholds == nil {
@@ -235,11 +235,11 @@ func (c Config) Normalize() (Config, error) {
 		c.API.Thresholds = maps.Clone(c.API.Thresholds)
 	}
 	if len(c.API.Thresholds) > 40 {
-		return c, fmt.Errorf("moderation supports at most 40 category thresholds")
+		return c, messages.Errorf("moderation supports at most 40 category thresholds")
 	}
 	for key, value := range c.API.Thresholds {
 		if !categoryName.MatchString(key) || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
-			return c, fmt.Errorf("moderation API thresholds require category names and scores from 0 to 1")
+			return c, messages.Errorf("moderation API thresholds require category names and scores from 0 to 1")
 		}
 	}
 	if err := ValidateAPIUse(c.Policy, c.API); err != nil {
@@ -250,7 +250,7 @@ func (c Config) Normalize() (Config, error) {
 
 func ValidateAPIUse(p Policy, api API) error {
 	if p.Mode != "off" && p.Strategy != "keywords" && (api.URL == "" || api.Model == "") {
-		return fmt.Errorf("moderation API URL and model are required for this policy")
+		return messages.Errorf("moderation API URL and model are required for this policy")
 	}
 	return nil
 }

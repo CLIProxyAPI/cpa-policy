@@ -1204,7 +1204,7 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
 .selection-section { display: grid; gap: 8px; margin-top: 20px; }
 .settings-dialog { width: min(620px, calc(100vw - 32px)); padding: 22px; }
 .moderation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.moderation-policy-editor [hidden], .credential-moderation [hidden] { display: none !important; }
+#tab-moderation [hidden], .moderation-policy-editor [hidden], .credential-moderation [hidden] { display: none !important; }
 .moderation-policy-editor .field, #tab-moderation .field { min-width: 0; margin: 12px 0; }
 .moderation-policy-editor .field > input,
 .moderation-policy-editor .field > select,
@@ -1221,12 +1221,14 @@ html:has(dialog[open]), body:has(dialog[open]) { overflow: hidden; }
   margin-top: 20px;
   padding-top: 16px;
 }
+.moderation-advanced, .moderation-bulk { margin-top: 16px; }
+.moderation-api-actions { margin-top: 16px; flex-wrap: wrap; }
 .moderation-rule-section h3 { margin: 0; font-size: 14px; }
 .moderation-rule { display: grid; grid-template-columns: minmax(90px, 1fr) 120px minmax(100px, 2fr) 34px; gap: 8px; margin-top: 8px; }
 .moderation-rule > input, .moderation-rule > select { min-width: 0; width: 100%; }
 .moderation-rule .icon-action { padding: 6px; width: 34px; }
-.moderation-api-settings > summary { cursor: pointer; font-weight: 600; }
-.moderation-api-settings[open] > summary { margin-bottom: 12px; }
+.moderation-api-settings > summary, .moderation-advanced > summary, .moderation-bulk > summary { cursor: pointer; font-weight: 600; }
+.moderation-api-settings[open] > summary, .moderation-advanced[open] > summary, .moderation-bulk[open] > summary { margin-bottom: 12px; }
 .moderation-result { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; overflow-wrap: anywhere; }
 .moderation-result > p { flex-basis: 100%; margin: 0; }
 .moderation-result[data-status="flagged"] > strong, .moderation-result[data-status="error"] > strong { color: var(--error-color); }

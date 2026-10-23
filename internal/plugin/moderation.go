@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"cpa-codex-controls/internal/messages"
 	"cpa-codex-controls/internal/moderation"
 	"cpa-codex-controls/internal/settings"
 )
@@ -23,12 +24,12 @@ func (a *App) validateModeration(req ManagementRequest) ManagementResponse {
 	}
 	cfg, err := cfg.Normalize()
 	if err != nil {
-		return JSONError(400, "invalid_moderation", err.Error())
+		return jsonMessageError(400, "invalid_moderation", messages.FromError(err))
 	}
 	for _, account := range a.store.CredentialPolicies() {
 		if account.Moderation != nil && account.Moderation.Policy != nil {
 			if err := moderation.ValidateAPIUse(*account.Moderation.Policy, cfg.API); err != nil {
-				return JSONError(400, "invalid_moderation", err.Error())
+				return jsonMessageError(400, "invalid_moderation", messages.FromError(err))
 			}
 		}
 	}
@@ -55,7 +56,7 @@ func (a *App) testModeration(req ManagementRequest) ManagementResponse {
 	}
 	cfg, err := cfg.Normalize()
 	if err != nil {
-		return JSONError(400, "invalid_moderation", err.Error())
+		return jsonMessageError(400, "invalid_moderation", messages.FromError(err))
 	}
 	compiled, _ := cfg.Policy.Compile()
 	if test.Format == "" {

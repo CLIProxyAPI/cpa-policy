@@ -289,10 +289,15 @@ async function editCredentialPolicy(row, kind, name) {
     ),
     el("div", { class: "row dialog-actions" }, cancel, save)
   );
+  form.addEventListener("invalid", (event) => revealModerationField(event.target), true);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     guard(async () => {
       if (saving || detecting) return;
+      try { riskEditor.validate(); } catch (failure) {
+        setText(error, failure.message);
+        return;
+      }
       const policy = {
         ...draft,
         max_concurrency: Number(limit.value),
@@ -338,6 +343,9 @@ async function editCredentialPolicy(row, kind, name) {
         notify(m("policy.saved"));
       } catch (failure) {
         if (failure instanceof AuthError || failure instanceof StaleRequestError) throw failure;
+        saving = false;
+        update();
+        riskEditor.revealError(failure);
         setText(error, failure.message || String(failure));
       } finally {
         saving = false;

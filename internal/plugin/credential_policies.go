@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"cpa-codex-controls/internal/location"
+	"cpa-codex-controls/internal/messages"
 	"cpa-codex-controls/internal/moderation"
 	"cpa-codex-controls/internal/settings"
 )
@@ -27,13 +28,13 @@ func (a *App) validateCredentialPolicies(req ManagementRequest) ManagementRespon
 	}
 	normalized, err := policies.Normalize()
 	if err != nil {
-		return JSONError(400, "invalid_credential_policy", err.Error())
+		return jsonMessageError(400, "invalid_credential_policy", messages.FromError(err))
 	}
 	api := a.store.ModerationConfig().API
 	for _, policy := range normalized {
 		if policy.Moderation != nil && policy.Moderation.Policy != nil {
 			if err := moderation.ValidateAPIUse(*policy.Moderation.Policy, api); err != nil {
-				return JSONError(400, "invalid_credential_policy", err.Error())
+				return jsonMessageError(400, "invalid_credential_policy", messages.FromError(err))
 			}
 		}
 	}

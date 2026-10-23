@@ -226,5 +226,111 @@
     "formats": [
       "%s"
     ]
+  },
+  "moderation mode must be off, observe, or pre_block": {
+    "key": "risk.validation_mode",
+    "formats": []
+  },
+  "moderation strategy must be keywords, api, or keywords_and_api": {
+    "key": "risk.validation_strategy",
+    "formats": []
+  },
+  "moderation scope must be latest_user or all_users": {
+    "key": "risk.validation_scope",
+    "formats": []
+  },
+  "moderation model_mode must be all, include, or exclude": {
+    "key": "risk.validation_model_mode",
+    "formats": []
+  },
+  "moderation failure_action must be allow or block": {
+    "key": "risk.validation_failure",
+    "formats": []
+  },
+  "moderation supports at most 100 rules and 100 model names": {
+    "key": "risk.validation_limits",
+    "formats": []
+  },
+  "moderation model names must contain 1–256 bytes": {
+    "key": "risk.validation_model_names",
+    "formats": []
+  },
+  "moderation model filter requires at least one model name": {
+    "key": "risk.validation_models_required",
+    "formats": []
+  },
+  "moderation rule %d requires a unique identifier": {
+    "key": "risk.validation_rule_id",
+    "formats": [
+      "%d"
+    ]
+  },
+  "moderation rule %d has an invalid name or pattern (maximum 128 / 512 bytes)": {
+    "key": "risk.validation_rule_pattern",
+    "formats": [
+      "%d"
+    ]
+  },
+  "moderation rule %d kind must be keyword or regex": {
+    "key": "risk.validation_rule_kind",
+    "formats": [
+      "%d"
+    ]
+  },
+  "moderation rule %d contains an invalid regular expression": {
+    "key": "risk.validation_rule_regex",
+    "formats": [
+      "%d"
+    ]
+  },
+  "moderation rule %d must not match empty text": {
+    "key": "risk.validation_rule_empty_match",
+    "formats": [
+      "%d"
+    ]
+  },
+  "keyword moderation requires at least one rule": {
+    "key": "risk.validation_rules_required",
+    "formats": []
+  },
+  "moderation override requires inherit, off, or custom with a policy": {
+    "key": "risk.validation_override",
+    "formats": []
+  },
+  "moderation API timeout_ms must be between 100 and 10000": {
+    "key": "risk.validation_api_timeout",
+    "formats": []
+  },
+  "moderation API max_in_flight must be between 1 and 64": {
+    "key": "risk.validation_api_concurrency",
+    "formats": []
+  },
+  "moderation API key_env must be an environment variable name": {
+    "key": "risk.validation_api_env",
+    "formats": []
+  },
+  "moderation API model must not exceed 128 bytes": {
+    "key": "risk.validation_api_model",
+    "formats": []
+  },
+  "moderation API URL must be an absolute URL without credentials, query, or fragment": {
+    "key": "risk.validation_api_url",
+    "formats": []
+  },
+  "moderation API URL requires HTTPS (HTTP is allowed only on loopback)": {
+    "key": "risk.validation_api_https",
+    "formats": []
+  },
+  "moderation supports at most 40 category thresholds": {
+    "key": "risk.validation_api_categories",
+    "formats": []
+  },
+  "moderation API thresholds require category names and scores from 0 to 1": {
+    "key": "risk.validation_api_thresholds",
+    "formats": []
+  },
+  "moderation API URL and model are required for this policy": {
+    "key": "risk.validation_api_required",
+    "formats": []
   }
 }

@@ -47,6 +47,43 @@ func callAudit(t *testing.T, a *App, req RequestInterceptRequest) RequestInterce
 	return response
 }
 
+func TestModerationValidationIncludesLocalizedRuleDetails(t *testing.T) {
+	a := NewApp()
+	defer a.Shutdown()
+	configureAudit(t, a, auditConfig(t))
+	cfg := a.store.ModerationConfig()
+	cfg.Rules = append(cfg.Rules, moderation.Rule{ID: "invalid-regex", Kind: "regex", Pattern: "["})
+	for _, endpoint := range []string{"global", "draft-test", "account"} {
+		t.Run(endpoint, func(t *testing.T) {
+			var response ManagementResponse
+			switch endpoint {
+			case "global":
+				response = a.validateModeration(ManagementRequest{Body: mustMarshal(t, cfg)})
+			case "draft-test":
+				response = a.testModeration(ManagementRequest{Body: mustMarshal(t, map[string]any{"config": cfg, "text": "test"})})
+			case "account":
+				policies := location.CredentialPolicies{"test-account": {Moderation: &moderation.Override{Mode: "custom", Policy: &cfg.Policy}}}
+				response = a.validateCredentialPolicies(ManagementRequest{Body: mustMarshal(t, policies)})
+			}
+			var body struct {
+				Error struct {
+					Key    string            `json:"message_key"`
+					Params map[string]string `json:"message_params"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(response.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != 400 || body.Error.Key != "risk.validation_rule_regex" || body.Error.Params["v0"] != "2" {
+				t.Fatalf("invalid localized response: %s", response.Body)
+			}
+		})
+	}
+	if len(a.store.ModerationConfig().Rules) != 1 {
+		t.Fatal("validation changed the live configuration")
+	}
+}
+
 func TestModerationAccountPrecedenceAndAdmission(t *testing.T) {
 	a := NewApp()
 	defer a.Shutdown()
