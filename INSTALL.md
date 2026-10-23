@@ -1,6 +1,6 @@
 # 安装与迁移
 
-本插件 ID 为 **`cpa-codex-controls`**，版本 **1.4.4**。管理菜单保持「账号设置」。包内动态库、接口路径和配置节点都使用新 ID，与原 `cpa-key-billing` 区分。
+本插件 ID 为 **`cpa-codex-controls`**，版本 **1.4.5**。管理菜单保持「账号设置」。包内动态库、接口路径和配置节点都使用新 ID，与原 `cpa-key-billing` 区分。
 
 ## 首次安装
 
@@ -36,7 +36,7 @@ plugins:
 
 从该源安装 `cpa-codex-controls`，根据宿主提示重启，确认注册版本。源和 Release ZIP 必须能从 CPA 服务器访问。商店提供 Linux amd64、Linux arm64、macOS arm64；其他平台以 Release 的实际构建产物为准。
 
-安装资源发布在 `https://github.com/CLIProxyAPI/cpa-policy/releases/tag/v1.4.4`，各平台 ZIP 内动态库均在根目录，另提供完整源码 ZIP 和 `checksums.txt`。
+安装资源发布在 `https://github.com/CLIProxyAPI/cpa-policy/releases/tag/v1.4.5`，各平台 ZIP 内动态库均在根目录，另提供完整源码 ZIP 和 `checksums.txt`。
 
 需要自行维护源时，复制商店仓库的 `registry.json`，将仓库、资源地址和署名改为自己的值；更新时同步修改版本、SHA256 和字节数，并保留许可证及原作者归属。
 
@@ -54,11 +54,11 @@ CPA_PLUGIN_REPOSITORY=CLIProxyAPI/cpa-policy sh install.sh
 
 ## 从 1.4.2-timezone.14 更新
 
-在插件商店刷新本源，安装 1.4.4 更新，并按宿主提示重启 CPA。插件 ID 保持 `cpa-codex-controls`，已有并发、时区和诊断库配置继续使用，无需迁移 ID。
+在插件商店刷新本源，安装 1.4.5 更新，并按宿主提示重启 CPA。插件 ID 保持 `cpa-codex-controls`，已有并发、时区和诊断库配置继续使用，无需迁移 ID。
 
 新增内容审计默认关闭；认证文件和 AI 供应商页面会显示其他类型。并发和内容审计可用于对应受支持请求，时区覆盖仍只改写支持的结构化时区与位置字段。详见 [CONTENT-AUDIT.md](CONTENT-AUDIT.md)。
 
-手动换库前先停止 CPA 并备份配置、动态库和诊断库。宿主保存的 `store.version` / `store.release-tag` 若仍固定旧版本，需要同步为 `1.4.4` / `v1.4.4`，否则新库可能被跳过。商店正常更新会管理这些信息。
+手动换库前先停止 CPA 并备份配置、动态库和诊断库。宿主保存的 `store.version` / `store.release-tag` 若仍固定旧版本，需要同步为 `1.4.5` / `v1.4.5`，否则新库可能被跳过。商店正常更新会管理这些信息。
 
 ## 从旧定制版迁移
 

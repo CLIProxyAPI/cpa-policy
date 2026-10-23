@@ -2,7 +2,7 @@
 
 Source and release assets are hosted in [CLIProxyAPI/cpa-policy](https://github.com/CLIProxyAPI/cpa-policy); the separate store registry is in [CLIProxyAPI/Plugins-Store](https://github.com/CLIProxyAPI/Plugins-Store).
 
-A customized fork of `haowang02/cpa-plugin-key-billing` 1.4.2, version **1.4.4**. The independent plugin ID is now **`cpa-codex-controls`**; the management menu remains **Account Controls**.
+A customized fork of `haowang02/cpa-plugin-key-billing` 1.4.2, version **1.4.5**. The independent plugin ID is now **`cpa-codex-controls`**; the management menu remains **Account Controls**.
 
 Removed: downstream API Key management/self-service, analytics, request events, subscription plans, routing rules, model pricing, and their backend/frontend/storage implementations. Plugin billing, subscription enforcement, price downloads, and scheduler hooks are gone. CPA still owns its access authentication and upstream credentials.
 

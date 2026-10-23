@@ -25,6 +25,12 @@ function moderationField(label, input, help) {
   );
 }
 
+function moderationRuleID() {
+  // Unlike randomUUID, getRandomValues is also available on HTTP management pages.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return "rule-" + Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function moderationPolicyEditor(prefix, value, onChange = () => {}) {
   const mode = moderationSelect(prefix + "-mode", ["off", "observe", "pre_block"]);
   const strategy = moderationSelect(prefix + "-strategy", ["keywords", "api", "keywords_and_api"]);
@@ -40,7 +46,7 @@ function moderationPolicyEditor(prefix, value, onChange = () => {}) {
     type: "button",
     text: m("risk.add_rule"),
     onclick: () => {
-      addRule({ id: "rule-" + crypto.randomUUID(), name: "", kind: "keyword", pattern: "" });
+      addRule({ id: moderationRuleID(), name: "", kind: "keyword", pattern: "" });
       change();
     }
   });

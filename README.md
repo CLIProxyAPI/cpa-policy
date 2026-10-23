@@ -2,7 +2,7 @@
 
 源码仓库为 [CLIProxyAPI/cpa-policy](https://github.com/CLIProxyAPI/cpa-policy)，商店索引单独维护在 [CLIProxyAPI/Plugins-Store](https://github.com/CLIProxyAPI/Plugins-Store)。
 
-基于 `haowang02/cpa-plugin-key-billing` 1.4.2 二次开发，当前版本 **1.4.4**。插件标识改为 **`cpa-codex-controls`**，与原计费插件独立；管理页面名称继续为「账号设置」。
+基于 `haowang02/cpa-plugin-key-billing` 1.4.2 二次开发，当前版本 **1.4.5**。插件标识改为 **`cpa-codex-controls`**，与原计费插件独立；管理页面名称继续为「账号设置」。
 
 本版已删除 **API Key 管理及自助页面、分析、请求事件、订阅计划、路由规则、模型定价**，包括对应接口、计费/额度扣减、价格同步、调度器、存储代码和前端模块。不会再按插件原有订阅、价格或 API Key 规则拒绝请求。CPA 自身的访问密钥鉴权和上游供应商凭据仍由宿主管理。
 
