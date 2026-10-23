@@ -202,6 +202,8 @@
   "policy.concurrency_help": "默认为 0，不限制也不排队；设置正数后才限制并发，排队使用全局并发策略。",
   "policy.saved": "单项设置已保存",
   "policy.changed": "此项已在其他位置修改，请重新打开设置后再保存。",
+  "policy.settings_unavailable": "设置加载失败，请在弹窗中重试或刷新列表。",
+  "policy.retry": "重试",
   "location.detect": "检测代理出口并填充时区",
   "location.detecting": "正在检测出口地区…",
   "location.detected": "已按出口 IP {ips} 填充，保存后生效。",

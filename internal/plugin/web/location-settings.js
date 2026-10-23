@@ -29,6 +29,7 @@ function applyLocationSettings(response) {
   const settings = response.custom_location;
   if (!settings || typeof settings.enabled !== "boolean" || typeof response.effective_timezone !== "string")
     throw new UIError(m("location.invalid_response"));
+  credentialLocationQuery.set("location", response);
   setBillingTimezone(response.effective_timezone);
   refreshBillingDateFormatters();
   {

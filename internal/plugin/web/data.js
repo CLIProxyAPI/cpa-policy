@@ -8,6 +8,12 @@ function createQuery(label, receive = (value) => value, render = renderPage) {
     task: null,
     request: null,
     clear() { Object.assign(query, { value: null, error: "", readAt: 0, key: "", task: null, request: null }); },
+    set(key, value) {
+      const received = receive(value);
+      query.clear();
+      Object.assign(query, { key, value: received, readAt: Date.now() });
+      render();
+    },
     read(key, fetch, reload = false) {
       if (key !== query.key) query.clear();
       if (!reload && query.task) return query.task;
@@ -57,6 +63,24 @@ const aiProvidersQuery = createQuery(m("ui.ai_providers"), (providers) => {
   return providers;
 });
 const credentialConcurrencyQuery = createQuery(m("policy.concurrency_column"), (value) => value, renderCredentialConcurrency);
+// Saved snapshots for row editors are separate from the global forms' drafts.
+const credentialLocationQuery = createQuery(
+  m("policy.title"),
+  (response) => {
+    const settings = requireObject(response.custom_location, m("policy.title"));
+    if (typeof settings.enabled !== "boolean") throw new UIError(m("location.invalid_response"));
+    return response;
+  },
+  renderCredentialConcurrency
+);
+const credentialModerationQuery = createQuery(
+  m("risk.title"),
+  (response) => {
+    requireObject(response.moderation, m("risk.title"));
+    return response;
+  },
+  renderCredentialConcurrency
+);
 function viewPreferenceKey(role, name) { return VIEW_PREFERENCE_PREFIX + (credentialScope.admin || "") + "." + name; }
 function saveChoice(role, id) {
   const control = $(id);
@@ -76,6 +100,8 @@ function resetRoleData() {
   authFilesQueries.admin.clear();
   aiProvidersQuery.clear();
   credentialConcurrencyQuery.clear();
+  credentialLocationQuery.clear();
+  credentialModerationQuery.clear();
   Object.values(credentialHealthQueries).forEach((query) => query.clear());
   resetDiagnostics();
   resetModeration();
@@ -88,7 +114,8 @@ function renderDataStatus() {
   const health = credentialHealthQueries[tab === "auth-files" ? "auth" : "provider"];
   const error =
     query?.error || (credentials && credentialConcurrencyQuery.error ? m("policy.concurrency_unavailable") : "") ||
-    (credentials && health.error ? m("health.load_failed") : "");
+    (credentials && health.error ? m("health.load_failed") : "") ||
+    (credentials && (credentialLocationQuery.error || credentialModerationQuery.error) ? m("policy.settings_unavailable") : "");
   setText($("admin-data-status"), error);
   $("admin-data-status").classList.toggle("show", !!error);
 }
@@ -105,9 +132,20 @@ function renderPage() {
 async function loadPage({ reload = false } = {}) {
   if (!currentRole) return;
   const tab = activeTab();
-  if (tab === "auth-files") await settleLoads([readAuthFiles(reload), readCredentialConcurrency(true), readCredentialHealth("auth", true)]);
+  if (tab === "auth-files")
+    await settleLoads([
+      readAuthFiles(reload),
+      readCredentialConcurrency(true),
+      readCredentialDefaults(reload),
+      readCredentialHealth("auth", true)
+    ]);
   else if (tab === "ai-providers")
-    await settleLoads([readAIProviders(reload), readCredentialConcurrency(true), readCredentialHealth("provider", true)]);
+    await settleLoads([
+      readAIProviders(reload),
+      readCredentialConcurrency(true),
+      readCredentialDefaults(reload),
+      readCredentialHealth("provider", true)
+    ]);
   else if (tab === "errors") await loadDiagnostics("errors", reload);
   else if (tab === "moderation") await settleLoads([loadModerationSettings(reload), loadModerationEvents(reload)]);
   else if (tab === "settings")

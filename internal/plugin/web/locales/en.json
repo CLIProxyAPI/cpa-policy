@@ -202,6 +202,8 @@
   "policy.concurrency_help": "Defaults to 0: no limit or queuing. Positive values limit concurrency and use the global queue settings.",
   "policy.saved": "Credential settings saved",
   "policy.changed": "This row changed elsewhere. Reopen the editor to avoid overwriting it.",
+  "policy.settings_unavailable": "Settings could not be loaded. Retry in the editor or refresh the list.",
+  "policy.retry": "Retry",
   "location.detect": "Detect exit location and fill timezone",
   "location.detecting": "Detecting exit location…",
   "location.detected": "Filled from exit IP: {ips}. Save to apply.",

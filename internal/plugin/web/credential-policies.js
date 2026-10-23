@@ -17,8 +17,18 @@ async function readCredentialPolicies() {
 }
 
 function readCredentialConcurrency(reload = false) {
-  if (credentialConcurrencyQuery.error) credentialConcurrencyQuery.value = null;
+  if (credentialConcurrencyQuery.error) {
+    credentialConcurrencyQuery.value = null;
+    reload = true;
+  }
   return credentialConcurrencyQuery.task || credentialConcurrencyQuery.read("credential-policies", readCredentialPolicies, reload);
+}
+
+function readCredentialDefaults(reload = false, supportsLocation = true) {
+  const queries = [[credentialModerationQuery, "moderation"], ...(supportsLocation ? [[credentialLocationQuery, "location"]] : [])];
+  return settleLoads(
+    queries.map(([query, endpoint]) => query.task || query.read(endpoint, () => plugin("GET", "/" + endpoint), reload || !!query.error))
+  );
 }
 
 function credentialConcurrencyCell(index) {
@@ -71,11 +81,7 @@ function credentialSettingsButton(row, kind, busy = false) {
       disabled: !row.auth_index || busy,
       "aria-label": m("policy.edit", { name }),
       "data-tip": m("ui.settings"),
-      onclick: (event) => {
-        const button = event.currentTarget;
-        button.disabled = true;
-        guard(async () => { try { await editCredentialPolicy(row, kind, name); } finally { button.disabled = !row.auth_index; } });
-      }
+      onclick: () => guard(() => editCredentialPolicy(row, kind, name))
     },
     actionIcon("settings")
   );
@@ -215,21 +221,68 @@ function locationEditor({
 }
 
 async function editCredentialPolicy(row, kind, name) {
+  if (document.querySelector(".credential-policy-dialog")) return;
   const generation = sessionGeneration;
   const supportsLocation = (row.category || row.type) === "codex" || (kind === "provider" && row.type === "openai");
-  const [current, global, risk] = await Promise.all([
-    readCredentialPolicies(),
-    supportsLocation ? plugin("GET", "/location") : null,
-    plugin("GET", "/moderation")
-  ]);
-  if (generation !== sessionGeneration) throw new StaleRequestError();
+  const dialog = el("dialog", { class: "settings-dialog credential-policy-dialog", "aria-labelledby": "credential-policy-title" });
+  dialog.addEventListener("close", () => dialog.remove(), { once: true });
+  document.body.append(dialog);
+  const queries = [credentialConcurrencyQuery, credentialModerationQuery, ...(supportsLocation ? [credentialLocationQuery] : [])];
+  const ready = () => queries.every((query) => query.value && !query.error);
+  async function load() {
+    const status = el("p", { role: "status", text: m("ui.loading") });
+    const retry = el("button", { type: "button", text: m("policy.retry"), hidden: true, onclick: () => guard(load) });
+    dialog.replaceChildren(
+      el(
+        "div",
+        {},
+        el("div", { class: "dialog-header" }, el("h2", { id: "credential-policy-title", text: m("policy.title") })),
+        el("div", { class: "dialog-body" }, el("p", { class: "muted policy-identity", text: name }), status),
+        el(
+          "div",
+          { class: "row dialog-actions" },
+          el("button", { type: "button", text: m("ui.cancel"), onclick: () => dialog.close() }),
+          retry
+        )
+      )
+    );
+    if (!dialog.open) dialog.showModal();
+    dialog.setAttribute("aria-busy", "true");
+    try {
+      await settleLoads([readCredentialConcurrency(), readCredentialDefaults(false, supportsLocation)]);
+      if (generation !== sessionGeneration || !dialog.open) throw new StaleRequestError();
+      if (!ready()) throw new UIError(m("policy.settings_unavailable"));
+      renderCredentialPolicyEditor(dialog, row, kind, name, supportsLocation, generation);
+    } catch (error) {
+      if (error instanceof AuthError || error instanceof StaleRequestError) {
+        dialog.close();
+        throw error;
+      }
+      status.className = "credential-error";
+      status.setAttribute("role", "alert");
+      setText(status, error.message || String(error));
+      retry.hidden = false;
+    } finally { dialog.removeAttribute("aria-busy"); }
+  }
+  try {
+    if (ready()) renderCredentialPolicyEditor(dialog, row, kind, name, supportsLocation, generation); else await load();
+  } catch (error) {
+    dialog.close();
+    dialog.remove();
+    throw error;
+  }
+}
+
+function renderCredentialPolicyEditor(dialog, row, kind, name, supportsLocation, generation) {
+  const current = credentialConcurrencyQuery.value;
+  const global = credentialLocationQuery.value;
+  const risk = credentialModerationQuery.value;
   const original = current.policies[row.auth_index] || defaultCredentialPolicy();
   const draft = structuredClone(original);
   const defaults = global?.custom_location;
   let mode = draft.location_mode || "inherit";
   let saving = false;
   let detecting = false;
-  const dialog = el("dialog", { class: "settings-dialog credential-policy-dialog", "aria-labelledby": "credential-policy-title" });
   const limit = el("input", {
     id: "credential-policy-limit",
     type: "number",
@@ -311,6 +364,7 @@ async function editCredentialPolicy(row, kind, name) {
       setText(error, "");
       try {
         const latest = await readCredentialPolicies();
+        credentialConcurrencyQuery.set("credential-policies", latest);
         if (JSON.stringify(latest.policies[row.auth_index] || defaultCredentialPolicy()) !== JSON.stringify(original))
           throw new UIError(m("policy.changed"));
         const validated = await plugin(
@@ -320,18 +374,18 @@ async function editCredentialPolicy(row, kind, name) {
           { command: true }
         );
         await api("PATCH", PLUGIN_BASE + "/config", { credential_policies: validated.policies }, { command: true });
-        let confirmed = false;
+        let confirmed = null;
         for (let attempt = 0; attempt < 12; attempt++) {
           if (generation !== sessionGeneration) throw new StaleRequestError();
           const response = await readCredentialPolicies();
           if (JSON.stringify(response.policies[row.auth_index]) === JSON.stringify(validated.policies[row.auth_index])) {
-            confirmed = true;
+            confirmed = response;
             break;
           }
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
         if (!confirmed) throw new UIError(m("location.reload_pending"));
-        credentialConcurrencyQuery.clear();
+        credentialConcurrencyQuery.set("credential-policies", confirmed);
         dialog.close();
         if (kind === "provider") {
           await settleLoads([readAIProviders(true), readCredentialConcurrency(true)]);
@@ -354,10 +408,8 @@ async function editCredentialPolicy(row, kind, name) {
     });
   });
   update();
-  dialog.append(form);
+  dialog.replaceChildren(form);
   dialog.addEventListener("cancel", (event) => { if (saving) event.preventDefault(); });
-  dialog.addEventListener("close", () => dialog.remove(), { once: true });
-  document.body.append(dialog);
-  dialog.showModal();
+  if (!dialog.open) dialog.showModal();
   limit.focus();
 }

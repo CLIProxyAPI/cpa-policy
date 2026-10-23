@@ -19,7 +19,8 @@ function scheduleCredentialConcurrencyRefresh(immediate = false) {
 document.addEventListener("visibilitychange", () => scheduleCredentialConcurrencyRefresh(true));
 function updateRefreshControls() {
   const loading =
-    !!authFilesQueries.admin.task || !!aiProvidersQuery.task || !!credentialConcurrencyQuery.task ||
+    !!authFilesQueries.admin.task || !!aiProvidersQuery.task || !!credentialConcurrencyQuery.task || !!credentialLocationQuery.task ||
+    !!credentialModerationQuery.task ||
     Object.values(credentialHealthQueries).some((query) => !!query.task) ||
     Object.values(diagnostics).some((item) => item.loading) ||
     (activeTab() === "moderation" && (moderationLoading || moderationSaving || moderationTesting || moderationEvents.loading)) ||

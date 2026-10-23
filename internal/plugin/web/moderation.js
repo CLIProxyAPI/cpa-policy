@@ -424,6 +424,7 @@ function applyModerationSettings(response) {
   moderationAPIResult.replaceChildren();
   moderationThresholds.value = Object.entries(config.api.thresholds).map(([key, value]) => `${key}=${value}`).join("\n");
   savedModeration = moderationDraft();
+  credentialModerationQuery.set("moderation", response);
 }
 async function loadModerationSettings(reload = false) {
   if (moderationLoading || moderationSaving || (savedModeration && !reload)) return;
